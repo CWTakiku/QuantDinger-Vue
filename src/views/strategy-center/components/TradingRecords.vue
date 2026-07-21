@@ -1,5 +1,11 @@
 <template>
   <div class="trading-records strategy-tab-pane-inner" :class="{ 'theme-dark': isDark }">
+    <div v-if="records.length || hasCostSummary" class="cost-summary-grid">
+      <div v-for="item in costSummaryItems" :key="item.key" class="cost-summary-card">
+        <span>{{ item.label }}</span>
+        <strong :class="item.tone">{{ item.value }}</strong>
+      </div>
+    </div>
     <div v-if="records.length === 0 && !loading" class="empty-state strategy-tab-empty">
       <a-empty :image="false" :description="$t('trading-assistant.table.noTrades')" />
     </div>
@@ -34,9 +40,16 @@
         ${{ parseFloat(text).toFixed(2) }}
       </template>
       <template slot="profit" slot-scope="text, record">
-        <span :class="['ta-pnl', profitToneClass(record)]">
-          {{ formatProfit(record) }}
-        </span>
+        <a-popover v-if="hasRealizedProfit(record)" placement="top" trigger="hover">
+          <div slot="content" class="pnl-breakdown">
+            <div><span>{{ $t('trading-assistant.costs.grossRealized') }}</span><strong>{{ formatMoneyValue(record.profit_gross) }}</strong></div>
+            <div><span>{{ $t('trading-assistant.costs.openingCommission') }}</span><strong>-{{ formatMoneyValue(record.open_commission_allocated) }}</strong></div>
+            <div><span>{{ $t('trading-assistant.costs.closingCommission') }}</span><strong>-{{ formatMoneyValue(record.close_commission) }}</strong></div>
+            <div class="pnl-breakdown-total"><span>{{ $t('trading-assistant.costs.netRealized') }}</span><strong>{{ formatProfit(record) }}</strong></div>
+          </div>
+          <span :class="['ta-pnl', profitToneClass(record)]">{{ formatProfit(record) }}</span>
+        </a-popover>
+        <span v-else :class="['ta-pnl', profitToneClass(record)]">{{ formatProfit(record) }}</span>
       </template>
       <template slot="grid_matched_profit" slot-scope="text, record">
         <span :class="['ta-pnl', gridProfitToneClass(record)]">
@@ -82,6 +95,36 @@ export default {
     isGridBot () {
       const bt = String(this.botType || '').toLowerCase()
       return bt === 'grid' || bt === 'dca'
+    },
+    hasCostSummary () {
+      return !!this.costSummary
+    },
+    costSummaryItems () {
+      const summary = this.costSummary || {}
+      const funding = Number(summary.funding_payment || 0)
+      const items = [
+        { key: 'gross', label: this.$t('trading-assistant.costs.grossRealized'), value: this.formatSignedMoney(summary.gross_realized_pnl), tone: this.moneyTone(summary.gross_realized_pnl) },
+        { key: 'openFee', label: this.$t('trading-assistant.costs.openingCommission'), value: this.formatExpense(summary.opening_commission), tone: 'cost-negative' },
+        { key: 'closeFee', label: this.$t('trading-assistant.costs.closingCommission'), value: this.formatExpense(summary.closing_commission), tone: 'cost-negative' }
+      ]
+      const brokerPayments = [
+        { key: 'regulatory', label: this.$t('trading-assistant.costs.regulatoryFees'), raw: summary.regulatory_payment },
+        { key: 'adr', label: this.$t('trading-assistant.costs.adrFees'), raw: summary.adr_payment },
+        { key: 'marginInterest', label: this.$t('trading-assistant.costs.marginInterest'), raw: summary.margin_interest_payment },
+        { key: 'brokerOther', label: this.$t('trading-assistant.costs.otherBrokerFees'), raw: summary.other_broker_payment }
+      ]
+      if (summary.broker_activity_applicable || brokerPayments.some(item => Math.abs(Number(item.raw || 0)) > 0)) {
+        brokerPayments.forEach(item => items.push({
+          ...item,
+          value: this.formatSignedMoney(item.raw),
+          tone: this.moneyTone(item.raw)
+        }))
+      }
+      items.push(
+        { key: 'funding', label: this.$t('trading-assistant.costs.funding'), value: this.formatSignedMoney(funding), tone: this.moneyTone(funding) },
+        { key: 'net', label: this.$t('trading-assistant.costs.netRealized'), value: this.formatSignedMoney(summary.net_realized_pnl), tone: this.moneyTone(summary.net_realized_pnl) }
+      )
+      return items
     },
     columns () {
       const cols = [
@@ -156,7 +199,8 @@ export default {
   },
   data () {
     return {
-      records: []
+      records: [],
+      costSummary: null
     }
   },
   watch: {
@@ -186,6 +230,7 @@ export default {
         const res = await getStrategyTrades(this.strategyId, this.$i18n && this.$i18n.locale)
         if (res.code === 1) {
           const list = res.data.trades || res.data.items || []
+          this.costSummary = res.data.cost_summary || null
           this.records = list.map(trade => {
             const t = { ...trade }
             t.time = t.created_at || t.time
@@ -202,6 +247,10 @@ export default {
             } else {
               const c = parseFloat(cm)
               t.commission = isNaN(c) ? null : c
+            }
+            if (t.commission_quote !== null && t.commission_quote !== undefined && t.commission_quote !== '') {
+              const cq = parseFloat(t.commission_quote)
+              t.commission_quote = isNaN(cq) ? null : cq
             }
             const price = t.price != null ? parseFloat(t.price) : null
             const amount = t.amount != null ? parseFloat(t.amount) : null
@@ -241,7 +290,9 @@ export default {
       const p = parseFloat(raw)
       if (isNaN(p)) return null
       let fee = 0
-      const cm = row && (row.commission != null ? row.commission : row.fee)
+      const cm = row && (row.commission_quote != null
+        ? row.commission_quote
+        : (row.commission != null ? row.commission : row.fee))
       if (cm !== null && cm !== undefined && cm !== '') {
         const c = parseFloat(cm)
         if (!isNaN(c)) fee = c
@@ -402,6 +453,28 @@ export default {
       const sign = value >= 0 ? '+' : '-'
       return `${sign}$${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     },
+    formatMoneyValue (value) {
+      const number = Number(value || 0)
+      return `$${Math.abs(number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+    },
+    formatSignedMoney (value) {
+      const number = Number(value || 0)
+      const sign = number > 0 ? '+' : (number < 0 ? '-' : '')
+      return `${sign}${this.formatMoneyValue(number)}`
+    },
+    formatExpense (value) {
+      const number = Math.abs(Number(value || 0))
+      return number > 0 ? `-${this.formatMoneyValue(number)}` : '$0.00'
+    },
+    moneyTone (value) {
+      const number = Number(value || 0)
+      if (number > 0) return 'cost-positive'
+      if (number < 0) return 'cost-negative'
+      return 'cost-neutral'
+    },
+    hasRealizedProfit (record) {
+      return record && record.profit_gross !== null && record.profit_gross !== undefined
+    },
     formatProfit (record) {
       const net = this.netTradePnl(record)
       if (net === null) return '--'
@@ -447,11 +520,11 @@ export default {
     },
     formatCommission (value, record) {
       const row = record && typeof record === 'object' ? record : null
-      if (row && row.total_commission != null && row.total_commission !== '') {
-        const total = parseFloat(row.total_commission)
-        if (!isNaN(total)) {
-          if (Math.abs(total) < 1e-12) return '$0.00'
-          return `$${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+      if (row && row.commission_quote != null && row.commission_quote !== '') {
+        const quoteFee = parseFloat(row.commission_quote)
+        if (!isNaN(quoteFee)) {
+          if (Math.abs(quoteFee) < 1e-12) return '$0.00'
+          return `$${quoteFee.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
         }
       }
       if (value === null || value === undefined) return '--'
@@ -477,6 +550,29 @@ export default {
   padding: 0;
   overflow-x: visible;
   overflow-y: visible;
+
+  .cost-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(130px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .cost-summary-card {
+    padding: 12px 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+    span { display: block; margin-bottom: 6px; color: #64748b; font-size: 12px; }
+    strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+  }
+  .cost-positive { color: @success-color; }
+  .cost-negative { color: @danger-color; }
+  .cost-neutral { color: #64748b; }
+  &.theme-dark .cost-summary-card {
+    background: #171717;
+    border-color: rgba(255, 255, 255, 0.1);
+    span { color: rgba(255, 255, 255, 0.48); }
+  }
 
   .trade-type-cell {
     max-width: 280px;
@@ -1167,6 +1263,18 @@ body.realdark .trading-records[data-v] .ant-table-wrapper {
       background: rgba(209, 212, 220, 0.5);
     }
   }
+}
+
+.pnl-breakdown {
+  min-width: 220px;
+  > div { display: flex; justify-content: space-between; gap: 24px; padding: 4px 0; }
+  span { color: #64748b; }
+  strong { font-variant-numeric: tabular-nums; }
+  .pnl-breakdown-total { margin-top: 4px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+}
+
+@media (max-width: 1100px) {
+  .trading-records .cost-summary-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 }
 </style>
 

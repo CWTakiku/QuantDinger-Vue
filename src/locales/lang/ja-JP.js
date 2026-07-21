@@ -988,7 +988,7 @@ const locale = {
   "backtest-center.audit.enabled": "Enabled",
   "backtest-center.audit.excessReturn": "Excess Return",
   "backtest-center.audit.executionAssumptions": "Execution Assumptions",
-  "backtest-center.audit.executionAssumptionsDesc": "Uses OHLC bars with full-fill assumptions; fees, slippage, and funding are recorded as run inputs.",
+  "backtest-center.audit.executionAssumptionsDesc": "Uses OHLC bars with full-fill assumptions; fees and slippage are modeled from run inputs, while historical funding is not modeled yet.",
   "backtest-center.audit.fillPolicy": "Fill Policy",
   "backtest-center.audit.fullFill": "Full Fill",
   "backtest-center.audit.limited": "Limited",

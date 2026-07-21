@@ -197,10 +197,10 @@
           </div>
 
           <div class="section-title">{{ t('executorStrategies.section.executor') }}</div>
-          <div class="anchor-setting">
+          <div v-if="!isDca || form.dca_price_filter_enabled" class="anchor-setting">
             <div>
-              <label>{{ t('executorStrategies.dynamicAnchor') }}</label>
-              <small>{{ t('executorStrategies.dynamicAnchorHint') }}</small>
+              <label>{{ t(isDca ? 'executorStrategies.dcaAnchor' : 'executorStrategies.dynamicAnchor') }}</label>
+              <small>{{ t(isDca ? 'executorStrategies.dcaAnchorHint' : 'executorStrategies.dynamicAnchorHint') }}</small>
             </div>
             <a-switch v-model="form.dynamic_anchor" />
           </div>
@@ -283,6 +283,69 @@
                   <a-radio-button value="geometric">{{ t('executorStrategies.geometric') }}</a-radio-button>
                 </a-radio-group>
               </div>
+            </div>
+          </div>
+
+          <div v-else-if="isDca" class="executor-specific">
+            <a-alert
+              class="dca-explainer"
+              type="info"
+              show-icon
+              :message="t('executorStrategies.dcaExplainerTitle')"
+              :description="t('executorStrategies.dcaExplainerDesc', {
+                orders: form.dca_max_orders,
+                interval: form.dca_interval_bars,
+                allocation: fmtPct(dcaOrderPct)
+              })" />
+            <div class="field-grid">
+              <div class="field-block">
+                <label>{{ t('executorStrategies.dcaMaxOrders') }}</label>
+                <a-input-number v-model="form.dca_max_orders" :min="1" :max="100" style="width: 100%" />
+                <small class="field-hint">{{ t('executorStrategies.dcaMaxOrdersHint') }}</small>
+              </div>
+              <div class="field-block">
+                <label>{{ t('executorStrategies.dcaIntervalBars') }}</label>
+                <a-input-number v-model="form.dca_interval_bars" :min="1" :max="100000" style="width: 100%" />
+                <small class="field-hint">{{ t('executorStrategies.dcaIntervalBarsHint', { timeframe: form.timeframe }) }}</small>
+              </div>
+            </div>
+            <div class="field-grid">
+              <div class="field-block">
+                <label>{{ t('executorStrategies.dcaTotalBudgetPct') }}</label>
+                <a-input-number
+                  v-model="dcaTotalBudgetPctDisplay"
+                  :min="0.01"
+                  :max="100"
+                  :step="1"
+                  :precision="2"
+                  style="width: 100%"
+                  @change="value => setRatio('dca_total_budget_pct', value)" />
+                <small class="field-hint">{{ t('executorStrategies.dcaTotalBudgetPctHint') }}</small>
+              </div>
+              <div class="field-block">
+                <label>{{ t('executorStrategies.dcaOrderPct') }}</label>
+                <a-input :value="fmtPct(dcaOrderPct)" disabled />
+                <small class="field-hint">{{ t('executorStrategies.dcaOrderPctHint') }}</small>
+              </div>
+            </div>
+            <div class="anchor-setting dca-filter-setting">
+              <div>
+                <label>{{ t('executorStrategies.dcaPriceFilter') }}</label>
+                <small>{{ t('executorStrategies.dcaPriceFilterHint') }}</small>
+              </div>
+              <a-switch v-model="form.dca_price_filter_enabled" />
+            </div>
+            <div v-if="form.dca_price_filter_enabled" class="field-block">
+              <label>{{ t('executorStrategies.dcaMaxAdversePricePct') }}</label>
+              <a-input-number
+                v-model="dcaMaxAdversePricePctDisplay"
+                :min="0"
+                :max="100"
+                :step="0.1"
+                :precision="2"
+                style="width: 100%"
+                @change="value => setRatio('dca_max_adverse_price_pct', value)" />
+              <small class="field-hint">{{ t('executorStrategies.dcaMaxAdversePricePctHint') }}</small>
             </div>
           </div>
 
@@ -501,26 +564,14 @@
 
       <section class="executor-preview-panel">
         <div class="panel-title panel-title--between">
-          <span><b class="panel-step">3</b><a-icon type="profile" />{{ t('executorStrategies.previewTitle') }}</span>
+          <span><b class="panel-step">3</b><a-icon type="profile" />{{ t(isDca ? 'executorStrategies.dcaPreviewTitle' : 'executorStrategies.previewTitle') }}</span>
           <a-tag v-if="preview.executor_type" color="green">{{ executorTypeText(preview.executor_type) }}</a-tag>
         </div>
 
         <div class="summary-grid">
-          <div class="summary-cell">
-            <span>{{ t('executorStrategies.summary.levels') }}</span>
-            <strong>{{ summary.level_count || 0 }}</strong>
-          </div>
-          <div class="summary-cell">
-            <span>{{ t('executorStrategies.summary.amount') }}</span>
-            <strong>100%</strong>
-          </div>
-          <div class="summary-cell">
-            <span>{{ t('executorStrategies.summary.first') }}</span>
-            <strong>{{ fmtPrice(summary.first_price) }}</strong>
-          </div>
-          <div class="summary-cell">
-            <span>{{ t('executorStrategies.summary.last') }}</span>
-            <strong>{{ fmtPrice(summary.last_price) }}</strong>
+          <div v-for="item in summaryCards" :key="item.key" class="summary-cell">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
           </div>
         </div>
 
@@ -628,6 +679,9 @@ export default {
         { key: 'layered_martingale', icon: 'cluster', titleKey: 'executorStrategies.type.layered_martingale', descKey: 'executorStrategies.catalog.layered_martingale', badgeKey: 'executorStrategies.supported' }
       ]
     },
+    isDca () {
+      return this.form.executor_type === 'dca'
+    },
     supportsTrailingTakeProfit () {
       return ['dca', 'martingale', 'layered_martingale'].includes(this.form.executor_type)
     },
@@ -639,6 +693,27 @@ export default {
     },
     previewWarnings () {
       return ((this.preview && this.preview.warnings) || []).map(item => this.warningText(item))
+    },
+    dcaOrderPct () {
+      const orders = Math.max(1, Number(this.form.dca_max_orders || 1))
+      return Math.max(0, Number(this.form.dca_total_budget_pct || 0)) / orders
+    },
+    summaryCards () {
+      if (this.isDca) {
+        const config = (this.preview && this.preview.config) || {}
+        return [
+          { key: 'orders', label: this.t('executorStrategies.summary.orders'), value: Number(this.summary.level_count || 0) },
+          { key: 'budget', label: this.t('executorStrategies.summary.budget'), value: this.fmtPct(config.dca_total_budget_pct) },
+          { key: 'interval', label: this.t('executorStrategies.summary.interval'), value: this.t('executorStrategies.summary.intervalValue', { count: Number(config.dca_interval_bars || 0) }) },
+          { key: 'perOrder', label: this.t('executorStrategies.summary.perOrder'), value: this.fmtPct(config.dca_order_pct) }
+        ]
+      }
+      return [
+        { key: 'levels', label: this.t('executorStrategies.summary.levels'), value: Number(this.summary.level_count || 0) },
+        { key: 'amount', label: this.t('executorStrategies.summary.amount'), value: '100%' },
+        { key: 'first', label: this.t('executorStrategies.summary.first'), value: this.fmtPrice(this.summary.first_price) },
+        { key: 'last', label: this.t('executorStrategies.summary.last'), value: this.fmtPrice(this.summary.last_price) }
+      ]
     },
     cryptoCredentials () {
       return (this.credentials || []).filter(isCryptoExchangeCredential)
@@ -658,6 +733,14 @@ export default {
         const start = Number(this.form.start_price || 0)
         const end = Number(this.form.end_price || 0)
         if (start <= 0 || end <= 0 || start === end) issues.push('priceBounds')
+      } else if (this.isDca) {
+        if (Number(this.form.dca_max_orders || 0) < 1) issues.push('dcaMaxOrders')
+        if (Number(this.form.dca_interval_bars || 0) < 1) issues.push('dcaIntervalBars')
+        const budget = Number(this.form.dca_total_budget_pct || 0)
+        if (budget <= 0 || budget > 1) issues.push('dcaBudget')
+        if (this.form.dca_price_filter_enabled && Number(this.form.dca_max_adverse_price_pct || 0) < 0) {
+          issues.push('dcaPriceFilter')
+        }
       } else {
         if (Number(this.form.entry_price || 0) <= 0) issues.push('entryPrice')
         if (Number(this.form.base_order_size || 0) <= 0) issues.push('baseOrder')
@@ -693,6 +776,14 @@ export default {
     trailingCallbackPctDisplay: {
       get () { return Number(this.form.trailing_callback_pct || 0) * 100 },
       set (value) { this.setRatio('trailing_callback_pct', value) }
+    },
+    dcaTotalBudgetPctDisplay: {
+      get () { return Number(this.form.dca_total_budget_pct || 0) * 100 },
+      set (value) { this.setRatio('dca_total_budget_pct', value) }
+    },
+    dcaMaxAdversePricePctDisplay: {
+      get () { return Number(this.form.dca_max_adverse_price_pct || 0) * 100 },
+      set (value) { this.setRatio('dca_max_adverse_price_pct', value) }
     },
     minSpreadPctDisplay: {
       get () { return Number(this.form.min_spread_between_orders || 0) * 100 },
@@ -735,6 +826,16 @@ export default {
       set (value) { this.setRatio('inter_spacing_4_pct', value) }
     },
     columns () {
+      if (this.isDca) {
+        return [
+          { title: this.t('executorStrategies.table.order'), dataIndex: 'order_index', width: 90 },
+          { title: this.t('executorStrategies.table.action'), dataIndex: 'action', scopedSlots: { customRender: 'action' }, width: 110 },
+          { title: this.t('executorStrategies.table.side'), dataIndex: 'side', scopedSlots: { customRender: 'side' }, width: 100 },
+          { title: this.t('executorStrategies.table.amount'), dataIndex: 'amount_quote', scopedSlots: { customRender: 'money' }, width: 150 },
+          { title: this.t('executorStrategies.table.scheduledBar'), dataIndex: 'scheduled_bar', customRender: value => this.t('executorStrategies.table.scheduledBarValue', { count: Number(value || 0) }), width: 160 },
+          { title: this.t('executorStrategies.table.cumulativeBudget'), dataIndex: 'cumulative_amount_quote', customRender: value => this.fmtPct(value), width: 170 }
+        ]
+      }
       return [
         { title: this.t('executorStrategies.table.level'), dataIndex: 'level', scopedSlots: { customRender: 'level' }, width: 80 },
         { title: this.t('executorStrategies.table.layer'), dataIndex: 'layer_index', width: 90 },
@@ -791,6 +892,11 @@ export default {
         initial_position_pct: 0.6,
         min_spread_between_orders: 0.0005,
         entry_price: 1,
+        dca_interval_bars: 60,
+        dca_max_orders: 5,
+        dca_total_budget_pct: 1,
+        dca_price_filter_enabled: false,
+        dca_max_adverse_price_pct: 0.05,
         base_order_size: 1,
         safety_order_size: 1.2,
         max_layers: 5,
@@ -1288,8 +1394,13 @@ export default {
   margin-top: 10px;
 }
 
-.layered-explainer {
+.layered-explainer,
+.dca-explainer {
   margin-bottom: 10px;
+}
+
+.dca-filter-setting {
+  margin-top: 2px;
 }
 
 .field-grid {
