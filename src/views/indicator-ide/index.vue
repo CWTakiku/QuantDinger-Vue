@@ -4984,8 +4984,10 @@ body.dark .ide-signal-alert-modal-wrap {
   }
   ::v-deep .qt-embedded-split--cols {
     flex-direction: column;
-    padding-left: 12px;
-    padding-right: 12px;
+    // Each form card already owns the same 14px outer margin as the symbol
+    // summary. Extra column padding made the trading form 24px narrower.
+    padding-left: 0;
+    padding-right: 0;
   }
   ::v-deep .qt-embedded-split--cols .qt-embedded-col-left,
   ::v-deep .qt-embedded-split--cols .qt-embedded-col-right {

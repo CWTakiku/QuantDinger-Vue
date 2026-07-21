@@ -4728,6 +4728,7 @@ const locale = {
   "community.sortPriceHigh": "Price: High to Low",
   "community.sortScore": "Top Performance",
   "community.totalReturn": "Return",
+  "community.annualReturn": "Annualized Return",
   "community.sharpe": "Sharpe",
   "community.maxDrawdown": "Max Drawdown",
   "community.profitFactor": "Profit Factor",

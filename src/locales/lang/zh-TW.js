@@ -1701,6 +1701,7 @@ const locale = {
   "community.total": "共",
   "community.totalProfit": "总收益",
   "community.totalReturn": "总收益率",
+  "community.annualReturn": "年化收益率",
   "community.tradeCount": "交易次数",
   "community.updateComment": "更新评论",
   "community.useBotPreset": "配置并使用",

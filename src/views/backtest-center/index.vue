@@ -808,6 +808,10 @@ export default {
         })
         this.result = response.data
         this.selectedRun = { id: response.data && response.data.runId }
+        const billing = response.data && response.data.billing
+        if (billing && typeof billing.remaining !== 'undefined') {
+          this.$root.$emit('credits-updated', billing.remaining)
+        }
         await this.loadHistory()
       } catch (error) {
         this.$message.error((error && error.backendMessage) || this.$t('strategyV2.backtest.runFailed'))
@@ -861,6 +865,25 @@ export default {
         const run = response.data || {}
         this.selectedRun = run
         this.result = run.result || null
+        const assumptions = (run.result && run.result.executionAssumptions) || {}
+        const initialCapital = run.initial_capital !== undefined && run.initial_capital !== null
+          ? run.initial_capital
+          : assumptions.initialCapital
+        const leverage = run.leverage !== undefined && run.leverage !== null
+          ? run.leverage
+          : assumptions.leverage
+        if (initialCapital !== undefined && initialCapital !== null) this.form.initialCapital = Number(initialCapital)
+        if (run.commission !== undefined && run.commission !== null) this.form.commission = Number(run.commission)
+        else if (assumptions.commission !== undefined) this.form.commission = Number(assumptions.commission)
+        if (run.slippage !== undefined && run.slippage !== null) this.form.slippage = Number(run.slippage)
+        else if (assumptions.slippage !== undefined) this.form.slippage = Number(assumptions.slippage)
+        this.form.leverage = Math.max(1, Number(leverage || 1))
+        this.form.leverageEnabled = assumptions.leverageEnabled !== undefined
+          ? Boolean(assumptions.leverageEnabled)
+          : this.form.leverage > 1
+        if (run.start_date || assumptions.startDate) this.form.startDate = moment(run.start_date || assumptions.startDate)
+        if (run.end_date || assumptions.endDate) this.form.endDate = moment(run.end_date || assumptions.endDate)
+        this.params = run.params || {}
         if (run.source_id && Number(this.form.sourceId) !== Number(run.source_id)) {
           this.form.sourceId = Number(run.source_id)
           const detail = await getScriptSourceDetail(run.source_id)
@@ -868,7 +891,6 @@ export default {
           const compiled = await compileScriptSource({ sourceId: run.source_id })
           this.manifest = compiled.data && compiled.data.manifest
           this.backtestRangePolicy = compiled.data && compiled.data.backtestRangePolicy
-          this.params = run.params || {}
         }
         this.historyVisible = false
       } catch (error) {

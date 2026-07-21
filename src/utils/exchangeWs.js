@@ -7,6 +7,24 @@
 
 // ── Exchange WebSocket configs ─────────────────────────────
 
+export function parseGateSpotBar (data) {
+  if (data.channel !== 'spot.candlesticks' || data.event !== 'update') return null
+  const c = data.result
+  if (!c) return null
+  const baseVolume = parseFloat(c.a)
+  return {
+    timestamp: parseInt(c.t) * 1000,
+    open: parseFloat(c.o),
+    high: parseFloat(c.h),
+    low: parseFloat(c.l),
+    close: parseFloat(c.c),
+    // Gate's `v` is quote-currency turnover (for example USDT), while
+    // `a` is the base-currency amount expected by the chart's OHLCV data.
+    volume: Number.isFinite(baseVolume) ? baseVolume : 0,
+    isClosed: c.w === true
+  }
+}
+
 const EXCHANGE_WS = {
   binance: {
     base: 'wss://stream.binance.com:9443/ws',
@@ -135,18 +153,7 @@ const EXCHANGE_WS = {
       }))
     },
     parseBar (data) {
-      if (data.channel !== 'spot.candlesticks' || data.event !== 'update') return null
-      const c = data.result
-      if (!c) return null
-      return {
-        timestamp: parseInt(c.t) * 1000,
-        open: parseFloat(c.o),
-        high: parseFloat(c.h),
-        low: parseFloat(c.l),
-        close: parseFloat(c.c),
-        volume: parseFloat(c.v),
-        isClosed: !!c.n
-      }
+      return parseGateSpotBar(data)
     },
     ping (ws) {
       try {

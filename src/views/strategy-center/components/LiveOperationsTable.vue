@@ -135,32 +135,90 @@
           </div>
         </header>
 
-        <div class="health-strip">
-          <div><span>{{ $t('liveMonitor.health') }}</span><strong :class="healthClass(selectedStrategy)">{{ healthLabel(selectedStrategy) }}</strong></div>
-          <div><span>{{ $t('strategyCenter.console.latency') }}</span><strong>{{ health(selectedStrategy).latency_ms || health(selectedStrategy).loop_latency_ms || '-' }} ms</strong></div>
-          <div><span>{{ $t('liveMonitor.exposure') }}</span><strong>{{ formatMoney(health(selectedStrategy).gross_exposure) }}</strong></div>
-          <div><span>{{ $t('strategyCenter.console.todayPnl') }}</span><strong :class="pnlClass(strategyPnl(selectedStrategy))">{{ formatPnl(strategyPnl(selectedStrategy)) }}</strong></div>
-          <div><span>{{ $t('liveMonitor.pendingOrders') }}</span><strong>{{ health(selectedStrategy).pending_orders || 0 }}</strong></div>
+        <div class="runtime-status-bar" :aria-label="$t('strategyCenter.console.runtimeStatus')">
+          <span>
+            {{ $t('liveMonitor.health') }}
+            <strong :class="healthClass(selectedStrategy)">{{ healthLabel(selectedStrategy) }}</strong>
+          </span>
+          <span>
+            {{ $t('strategyCenter.console.latency') }}
+            <strong>{{ health(selectedStrategy).latency_ms || health(selectedStrategy).loop_latency_ms || '-' }} ms</strong>
+          </span>
+          <span>
+            {{ $t('liveMonitor.pendingOrders') }}
+            <strong>{{ health(selectedStrategy).pending_orders || 0 }}</strong>
+          </span>
         </div>
 
-        <div class="performance-strip">
-          <div>
-            <span>{{ $t('trading-assistant.performance.totalReturn') }}</span>
-            <strong :class="pnlClass(performanceSummary.totalReturn)">{{ formatPercent(performanceSummary.totalReturn) }}</strong>
+        <section class="metric-section financial-metrics">
+          <div class="metric-section-head">
+            <h3>{{ $t('strategyCenter.console.financialOverview') }}</h3>
+            <span>{{ financialMetricContext }}</span>
           </div>
-          <div>
-            <span>{{ $t('trading-assistant.performance.maxDrawdown') }}</span>
-            <strong class="drawdown-value">{{ formatPercent(performanceSummary.maxDrawdown) }}</strong>
+          <div class="financial-strip">
+            <div>
+              <span>{{ $t('strategyCenter.console.strategyCapital') }}</span>
+              <strong>{{ formatLiveMoney(performanceSummary.capital) }}</strong>
+              <small>{{ financialMetricSuffix }}</small>
+            </div>
+            <div class="primary-financial-card">
+              <span>{{ $t('strategyCenter.console.currentEquity') }}</span>
+              <strong>{{ formatLiveMoney(performanceSummary.latestEquity) }}</strong>
+              <small>{{ financialMetricSuffix }}</small>
+            </div>
+            <div>
+              <span>{{ $t('strategyCenter.console.cumulativeNetPnl') }}</span>
+              <strong :class="isLiveFinancial ? pnlClass(performanceSummary.netPnl) : ''">{{ formatLiveMoney(performanceSummary.netPnl, true) }}</strong>
+              <small>{{ financialMetricSuffix }}</small>
+            </div>
+            <div>
+              <span :title="$t('strategyCenter.console.currentExposureHint')">{{ $t('strategyCenter.console.currentExposure') }}</span>
+              <strong>{{ formatLiveMoney(performanceSummary.grossExposure) }}</strong>
+              <small>{{ financialMetricSuffix }}</small>
+            </div>
+            <div>
+              <span>{{ $t('strategyCenter.console.leverage') }}</span>
+              <strong>{{ leverageDisplay }}</strong>
+              <small>{{ leverageMarketLabel }}</small>
+            </div>
           </div>
-          <div>
-            <span>{{ $t('trading-assistant.performance.winRate') }}</span>
-            <strong>{{ formatPercent(performanceSummary.winRate, false) }}</strong>
+        </section>
+
+        <section class="metric-section performance-metrics">
+          <div class="metric-section-head">
+            <h3>{{ $t('strategyCenter.console.performanceOverview') }}</h3>
+            <span>{{ $t('strategyCenter.console.realtimeData') }}</span>
           </div>
-          <div>
-            <span>{{ $t('trading-assistant.performance.totalTrades') }}</span>
-            <strong>{{ performanceSummary.totalTrades }}</strong>
+          <div class="performance-strip">
+            <div>
+              <span>{{ $t('strategyCenter.console.todayPnl') }}</span>
+              <strong :class="isLiveFinancial ? pnlClass(strategyPnl(selectedStrategy)) : ''">{{ formatLivePnl(strategyPnl(selectedStrategy)) }}</strong>
+              <small
+                v-if="isLiveFinancial && selectedStrategy.today_pnl_estimated"
+                :title="$t('strategyCenter.console.todayPnlEstimatedHint')"
+              >{{ $t('strategyCenter.console.todayPnlEstimated') }}</small>
+            </div>
+            <div>
+              <span>{{ $t('trading-assistant.performance.totalReturn') }}</span>
+              <strong :class="isLiveFinancial ? pnlClass(performanceSummary.totalReturn) : ''">{{ formatLivePercent(performanceSummary.totalReturn) }}</strong>
+            </div>
+            <div>
+              <span>{{ $t('trading-assistant.performance.maxDrawdown') }}</span>
+              <strong class="drawdown-value">{{ formatLivePercent(Math.abs(performanceSummary.maxDrawdown), false) }}</strong>
+            </div>
+            <div>
+              <span>{{ $t('trading-assistant.performance.winRate') }}</span>
+              <strong>{{ formatLivePercent(performanceSummary.winRate, false) }}</strong>
+              <small v-if="isLiveFinancial && performanceSummary.completedTrades">
+                {{ $t('strategyCenter.console.winRateSample', { wins: performanceSummary.wins, total: performanceSummary.completedTrades }) }}
+              </small>
+            </div>
+            <div>
+              <span>{{ $t('strategyCenter.console.completedTrades') }}</span>
+              <strong>{{ isLiveFinancial ? performanceSummary.completedTrades : '—' }}</strong>
+            </div>
           </div>
-        </div>
+        </section>
 
         <a-tabs v-model="detailTab" class="runtime-tabs" :animated="false">
           <a-tab-pane key="overview" :tab="$t('strategyCenter.tabs.overview')">
@@ -230,9 +288,12 @@ import {
   normalizeTimestampMilliseconds,
   strategyExchangeId,
   strategyExecutionMode,
+  strategyLeverage,
   strategyLastActivity,
+  strategyQuoteCurrency,
   strategySymbol,
-  strategyTradingConfig
+  strategyTradingConfig,
+  summarizeStrategyPerformance
 } from '@/utils/strategyRuntime'
 
 export default {
@@ -292,30 +353,41 @@ export default {
       return this.curve.filter(item => Number.isFinite(Number(item && (item.equity != null ? item.equity : item.value)))).length >= 2
     },
     performanceSummary () {
-      const values = this.curve
-        .map(item => Number(item && (item.equity != null ? item.equity : item.value)))
-        .filter(Number.isFinite)
-      const initial = values.length ? values[0] : 0
-      const finalValue = values.length ? values[values.length - 1] : initial
-      const totalReturn = initial > 0 ? (finalValue - initial) / initial : 0
-      let peak = values.length ? values[0] : 0
-      let maxDrawdown = 0
-      values.forEach(value => {
-        if (value > peak) peak = value
-        if (peak > 0) maxDrawdown = Math.min(maxDrawdown, (value - peak) / peak)
-      })
-      const settled = this.trades.filter(trade => {
-        const type = String(trade && trade.type || '').toLowerCase()
-        return !type.startsWith('open') && !type.startsWith('add') && trade && trade.profit != null && trade.profit !== ''
-      })
-      const decided = settled.map(trade => Number(trade.profit || 0)).filter(Number.isFinite)
-      const wins = decided.filter(value => value > 0).length
       return {
-        totalReturn,
-        maxDrawdown,
-        winRate: decided.length ? wins / decided.length : 0,
-        totalTrades: this.trades.length
+        ...summarizeStrategyPerformance({
+          strategy: this.selectedStrategy,
+          curve: this.curve,
+          trades: this.trades
+        }),
+        grossExposure: Number(this.health(this.selectedStrategy).gross_exposure || 0)
       }
+    },
+    isLiveFinancial () {
+      return this.selectedStrategy && this.executionMode(this.selectedStrategy) === 'live'
+    },
+    financialCurrency () {
+      return strategyQuoteCurrency(this.selectedStrategy)
+    },
+    financialMetricContext () {
+      return this.isLiveFinancial
+        ? this.$t('strategyCenter.console.netPnlBasis')
+        : this.$t('strategyCenter.console.liveFinancialUnavailable')
+    },
+    financialMetricSuffix () {
+      return this.isLiveFinancial
+        ? this.financialCurrency
+        : this.$t('systemOverview.signal')
+    },
+    leverageDisplay () {
+      if (!this.isLiveFinancial) return '—'
+      return `${strategyLeverage(this.selectedStrategy).toLocaleString(undefined, { maximumFractionDigits: 2 })}×`
+    },
+    leverageMarketLabel () {
+      if (!this.isLiveFinancial) return this.$t('systemOverview.signal')
+      const marketType = String(this.tradingConfig(this.selectedStrategy).market_type || this.selectedStrategy.market_type || '').toLowerCase()
+      return marketType === 'spot'
+        ? this.$t('strategyCenter.console.spotMarket')
+        : this.$t('strategyCenter.console.swapMarket')
     }
   },
   watch: {
@@ -420,14 +492,28 @@ export default {
     needsAttention (strategy) { return ['degraded', 'stale', 'offline'].includes(this.healthState(strategy)) || Number(this.health(strategy).failed_orders || 0) > 0 },
     statusClass (strategy) { return this.needsAttention(strategy) ? 'warning' : (this.isRunning(strategy) ? 'running' : 'stopped') },
     statusLabel (strategy) { return this.needsAttention(strategy) ? this.healthLabel(strategy) : (this.isRunning(strategy) ? this.$t('systemOverview.running') : this.$t('systemOverview.stopped')) },
-    strategyPnl (strategy) { return Number(strategy && (strategy.today_pnl != null ? strategy.today_pnl : strategy.total_pnl) || 0) },
+    strategyPnl (strategy) {
+      if (!strategy || strategy.today_pnl == null || strategy.today_pnl === '') return null
+      const value = Number(strategy.today_pnl)
+      return Number.isFinite(value) ? value : null
+    },
     lastActivity (strategy) {
       return this.health(strategy).last_heartbeat_at || strategyLastActivity(strategy)
     },
     pnlClass (value) { const number = Number(value || 0); return number > 0 ? 'profit' : number < 0 ? 'loss' : '' },
-    formatPnl (value) { const number = Number(value || 0); return `${number > 0 ? '+' : ''}${number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+    formatPnl (value) {
+      if (value == null || value === '' || !Number.isFinite(Number(value))) return '—'
+      const number = Number(value)
+      return `${number > 0 ? '+' : ''}${number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    },
     formatPercent (value, signed = true) { const number = Number(value || 0) * 100; return `${signed && number > 0 ? '+' : ''}${number.toFixed(2)}%` },
-    formatMoney (value) { return Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+    formatLiveMoney (value, signed = false) {
+      if (!this.isLiveFinancial) return '—'
+      const number = Number(value || 0)
+      return `${signed && number > 0 ? '+' : ''}${number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    },
+    formatLivePnl (value) { return this.isLiveFinancial ? this.formatPnl(value) : '—' },
+    formatLivePercent (value, signed = true) { return this.isLiveFinancial ? this.formatPercent(value, signed) : '—' },
     formatTime (value) {
       if (!value) return '-'
       const numeric = typeof value === 'number' || /^\d+(?:\.\d+)?$/.test(String(value).trim()) ? Number(value) : null
@@ -490,12 +576,25 @@ export default {
 .pause-actions { display: inline-flex; gap: 8px; }
 .delete-strategy-button:not([disabled]) { border-color: rgba(217, 86, 86, .4); color: #d95656; }
 .delete-strategy-button:not([disabled]):hover { border-color: #d95656; color: #d95656; }
-.health-strip { display: grid; grid-template-columns: repeat(5, 1fr); margin: 16px 0; border: 1px solid #e4e8ed; background: #fafbfc; }
-.health-strip > div { min-width: 0; padding: 13px 14px; border-right: 1px solid #e7eaf0; }.health-strip > div:last-child { border-right: 0; }.health-strip span { display: block; margin-bottom: 5px; color: #7e8896; font-size: 12px; font-weight: 500; }.health-strip strong { color: #202a37; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }.health-healthy { color: #25a25a !important; }.health-degraded,.health-stale { color: #d18425 !important; }.health-offline { color: #d95656 !important; }
-.performance-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 0 0 12px; }
-.performance-strip > div { min-width: 0; padding: 10px 14px; border: 1px solid #e2e7ee; border-radius: 8px; background: #fff; }
-.performance-strip span { display: block; margin-bottom: 3px; color: #7e8896; font-size: 11px; font-weight: 500; }
-.performance-strip strong { color: #202a37; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.runtime-status-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin: 10px 2px 12px; color: #788391; font-size: 12px; }
+.runtime-status-bar > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.runtime-status-bar strong { color: #202a37; font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.health-healthy { color: #25a25a !important; }.health-degraded,.health-stale { color: #d18425 !important; }.health-offline { color: #d95656 !important; }
+.metric-section { margin-bottom: 12px; }
+.metric-section-head { display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding: 0 2px 6px; }
+.metric-section-head h3 { margin: 0; color: #353f4c; font-size: 13px; font-weight: 650; }
+.metric-section-head > span { color: #89929f; font-size: 11px; }
+.financial-strip,.performance-strip { display: grid; gap: 10px; }
+.financial-strip { grid-template-columns: 1.05fr 1.1fr 1.1fr 1fr .8fr; }
+.performance-strip { grid-template-columns: repeat(5, 1fr); }
+.financial-strip > div,.performance-strip > div { min-width: 0; padding: 11px 14px; border: 1px solid #e2e7ee; border-radius: 8px; background: #fff; }
+.financial-strip > div { min-height: 84px; }
+.performance-strip > div { min-height: 72px; }
+.financial-strip span,.performance-strip span { display: block; margin-bottom: 4px; overflow: hidden; color: #7e8896; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.financial-strip strong,.performance-strip strong { display: block; overflow: hidden; color: #202a37; font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.financial-strip small,.performance-strip small { display: block; margin-top: 3px; color: #98a0ab; font-size: 10px; font-weight: 500; line-height: 1.3; }
+.financial-strip .primary-financial-card { border-color: color-mix(in srgb, var(--primary-color, #1890ff) 32%, #e2e7ee); background: color-mix(in srgb, var(--primary-color, #1890ff) 5%, #fff); }
+.financial-strip .primary-financial-card strong { font-size: 18px; }
 .performance-strip .drawdown-value { color: #c28818; }
 .panel-section { border: 1px solid #e4e8ed; background: #fff; }.section-head { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 14px; border-bottom: 1px solid #e7eaf0; }.section-head h3 { margin: 0; color: #242e3b; font-size: 14px; font-weight: 650; }.section-head > span { color: #7e8895; font-size: 12px; }
 .equity-chart { height: 310px; }
@@ -504,7 +603,7 @@ export default {
 .overview-positions-panel ::v-deep .positions-section { padding: 0 14px 14px; }
 .overview-positions-panel ::v-deep .strategy-tab-empty { min-height: 132px; border: 0; background: transparent; }
 .workspace-empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 620px; padding: 30px; text-align: center; }.workspace-empty > .anticon { margin-bottom: 18px; color: #d19a18; font-size: 42px; }.workspace-empty h2 { margin: 0 0 8px; }.workspace-empty p { max-width: 430px; margin-bottom: 20px; color: #7b8490; }.detail-empty { display: flex; align-items: center; justify-content: center; }
-.theme-dark { border-color: #262a30; background: #111315; color: #e5e7eb; .strategy-master { border-color: #292d33; background: #121416; }.master-tabs,.strategy-master footer { border-color: #292d33; }.master-tabs b { background: #25282d; color: #a5abb4; }.strategy-row { border-color: #272b31; }.strategy-row:hover { background: #191c20; }.strategy-row.selected { background: #211d13; }.row-main strong { color: #e7e9ed; }.row-main small,.row-status { color: #818995; }.row-status em { border-color: #383c43; color: #959ca6; }.strategy-detail { background: #101214; }.detail-header,.section-head { border-color: #292d33; }.detail-title-line h2 { color: #f0f1f3; }.status-pill.stopped { background: #262a2f; color: #9ba2ab; }.execution-pill { border-color: #3a3e45; }.health-strip { border-color: #292d33; background: #15181b; }.health-strip > div { border-color: #292d33; }.health-strip strong { color: #e1e4e8; }.panel-section { border-color: #292d33; background: #131517; }.section-head h3 { color: #e0e3e7; }.master-search ::v-deep .ant-input { border-color: #30343a; background: #181b1e; color: #e4e7eb; }.workspace-empty h2 { color: #eceef1; }}
+.theme-dark { border-color: #262a30; background: #111315; color: #e5e7eb; .strategy-master { border-color: #292d33; background: #121416; }.master-tabs,.strategy-master footer { border-color: #292d33; }.master-tabs b { background: #25282d; color: #a5abb4; }.strategy-row { border-color: #272b31; }.strategy-row:hover { background: #191c20; }.strategy-row.selected { background: #211d13; }.row-main strong { color: #e7e9ed; }.row-main small,.row-status { color: #818995; }.row-status em { border-color: #383c43; color: #959ca6; }.strategy-detail { background: #101214; }.detail-header,.section-head { border-color: #292d33; }.detail-title-line h2 { color: #f0f1f3; }.status-pill.stopped { background: #262a2f; color: #9ba2ab; }.execution-pill { border-color: #3a3e45; }.runtime-status-bar strong { color: #e1e4e8; }.metric-section-head h3 { color: #d8dce2; }.panel-section { border-color: #292d33; background: #131517; }.section-head h3 { color: #e0e3e7; }.master-search ::v-deep .ant-input { border-color: #30343a; background: #181b1e; color: #e4e7eb; }.workspace-empty h2 { color: #eceef1; }}
 .theme-dark .exchange-pill { border-color: rgba(64, 169, 255, .3); color: #69c0ff; background: rgba(24, 144, 255, .1); }
 
 /* Operational console layout */
@@ -599,21 +698,6 @@ export default {
 .detail-title-line { gap: 8px; }
 .detail-title-line h2 { font-size: 22px; }
 .detail-actions ::v-deep .ant-btn { height: 36px; border-radius: 6px; }
-.health-strip {
-  gap: 10px;
-  margin: 12px 0;
-  border: 0;
-  background: transparent;
-}
-.health-strip > div {
-  min-height: 78px;
-  padding: 13px 14px;
-  border: 1px solid #e2e7ee;
-  border-radius: 8px;
-  background: #fff;
-}
-.health-strip > div:last-child { border-right: 1px solid #e2e7ee; }
-.health-strip strong { font-size: 16px; }
 .runtime-tabs { margin-top: 12px; }
 .runtime-tabs ::v-deep .ant-tabs-bar {
   margin: 0 0 12px;
@@ -678,15 +762,18 @@ export default {
   .strategy-row.selected { background: color-mix(in srgb, var(--primary-color, #52c41a) 12%, #111); }
   .strategy-detail { background: #080808; }
   .detail-header,
-  .health-strip > div,
+  .financial-strip > div,
   .performance-strip > div,
   .panel-section { border-color: rgba(255, 255, 255, 0.1); background: #111; }
+  .financial-strip .primary-financial-card {
+    border-color: color-mix(in srgb, var(--primary-color, #52c41a) 38%, rgba(255, 255, 255, .1));
+    background: color-mix(in srgb, var(--primary-color, #52c41a) 7%, #111);
+  }
   .runtime-tabs ::v-deep .ant-tabs-bar,
   .runtime-tabs ::v-deep .strategy-tab-pane-inner { border-color: rgba(255, 255, 255, 0.1); background: #111; }
   .runtime-tabs ::v-deep .ant-tabs-nav .ant-tabs-tab { color: #89919c; }
   .runtime-tabs ::v-deep .ant-tabs-nav .ant-tabs-tab-active { color: var(--primary-color, #52c41a); }
-  .health-strip { background: transparent; }
-  .health-strip > div:last-child { border-right-color: rgba(255, 255, 255, 0.1); }
+  .financial-strip strong,
   .performance-strip strong { color: #e1e4e8; }
   .section-empty { background: #0d0d0d; }
   .section-empty > .anticon { color: var(--primary-color, #52c41a); }
@@ -703,6 +790,6 @@ export default {
   border: 0;
   background: transparent;
 }
-@media (max-width: 1080px) { .operations-workspace { grid-template-columns: 290px minmax(0, 1fr); }.health-strip { grid-template-columns: repeat(3, 1fr); }.health-strip > div { border-bottom: 1px solid #e7eaf0; }.performance-strip { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 760px) { .operations-workspace { display: block; height: auto; }.strategy-master { max-height: 430px; border-right: 0; border-bottom: 1px solid #e4e8ee; }.strategy-detail { overflow: visible; padding: 14px; }.detail-header { flex-direction: column; }.detail-actions { width: 100%; }.detail-actions .ant-btn { flex: 1; }.pause-actions { width: 100%; }.health-strip,.performance-strip { grid-template-columns: repeat(2, 1fr); }.equity-chart { height: 240px; } }
+@media (max-width: 1080px) { .operations-workspace { grid-template-columns: 290px minmax(0, 1fr); }.financial-strip,.performance-strip { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px) { .operations-workspace { display: block; height: auto; }.strategy-master { max-height: 430px; border-right: 0; border-bottom: 1px solid #e4e8ee; }.strategy-detail { overflow: visible; padding: 14px; }.detail-header { flex-direction: column; }.detail-actions { width: 100%; }.detail-actions .ant-btn { flex: 1; }.pause-actions { width: 100%; }.financial-strip,.performance-strip { grid-template-columns: repeat(2, 1fr); }.metric-section-head { align-items: flex-start; flex-direction: column; gap: 2px; }.equity-chart { height: 240px; } }
 </style>

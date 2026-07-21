@@ -4711,6 +4711,7 @@ const locale = {
   "community.sortPriceHigh": "价格从高到低",
   "community.sortScore": "综合评分",
   "community.totalReturn": "总收益率",
+  "community.annualReturn": "年化收益率",
   "community.sharpe": "夏普",
   "community.maxDrawdown": "最大回撤",
   "community.profitFactor": "盈亏比",

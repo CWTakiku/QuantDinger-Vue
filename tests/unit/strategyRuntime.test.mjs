@@ -5,10 +5,14 @@ import {
   filterAndSortStrategies,
   normalizeTimestampMilliseconds,
   strategyExchangeId,
+  strategyCapital,
   strategyExecutionMode,
+  strategyLeverage,
   strategyLastActivityTimestamp,
+  strategyQuoteCurrency,
   strategyRuntimeSummary,
-  strategySymbol
+  strategySymbol,
+  summarizeStrategyPerformance
 } from '../../src/utils/strategyRuntime.js'
 
 const rows = [
@@ -75,6 +79,44 @@ test('summarizes live operations without excluding strategies that have no trade
     totalPnl: 20,
     totalCapital: 3500
   })
+})
+
+test('resolves capital, leverage and quote currency from supported strategy shapes', () => {
+  const strategy = {
+    initial_capital: 2500,
+    leverage: 5,
+    trading_config: { symbol: 'Crypto:BTC/USDT@swap', market_type: 'swap' }
+  }
+  assert.equal(strategyCapital(strategy), 2500)
+  assert.equal(strategyLeverage(strategy), 5)
+  assert.equal(strategyQuoteCurrency(strategy), 'USDT')
+  assert.equal(strategyLeverage({ leverage: 10, trading_config: { market_type: 'spot' } }), 1)
+  assert.equal(strategyQuoteCurrency({ trading_config: { symbol: 'USStock:AAPL' } }), 'USD')
+})
+
+test('calculates live performance from configured capital and completed trades', () => {
+  const summary = summarizeStrategyPerformance({
+    strategy: { initial_capital: 1000, total_pnl: 999 },
+    curve: [
+      { equity: 1020 },
+      { equity: 900 },
+      { equity: 1010 }
+    ],
+    trades: [
+      { type: 'open_long', profit: null },
+      { type: 'add_long', profit: null },
+      { type: 'close_long', profit: 20 },
+      { type: 'close_short', profit: -10 }
+    ]
+  })
+  assert.equal(summary.capital, 1000)
+  assert.equal(summary.latestEquity, 1010)
+  assert.equal(summary.netPnl, 10)
+  assert.equal(summary.totalReturn, 0.01)
+  assert.equal(summary.maxDrawdown, (900 - 1020) / 1020)
+  assert.equal(summary.wins, 1)
+  assert.equal(summary.completedTrades, 2)
+  assert.equal(summary.winRate, 0.5)
 })
 
 test('filters and sorts running strategies before stopped strategies', () => {

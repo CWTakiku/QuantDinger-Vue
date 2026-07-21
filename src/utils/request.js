@@ -108,9 +108,27 @@ function normalizeBacktestRangeLimitError (error) {
   )
 }
 
+function normalizeInsufficientCreditsError (error) {
+  const envelope = error && error.response && error.response.data
+  const details = envelope && envelope.data
+  if (!details || details.error_type !== 'INSUFFICIENT_CREDITS') return ''
+  const current = Number(details.current || 0)
+  const required = Number(details.required || 0)
+  const shortage = Number.isFinite(Number(details.shortage))
+    ? Number(details.shortage)
+    : Math.max(0, required - current)
+  return tf(
+    'fastAnalysis.insufficientCreditsDetail',
+    'Insufficient credits: need {required}, you have {current}, short by {shortage}.',
+    { current, required, shortage }
+  )
+}
+
 function normalizeBusinessErrorMessage (message, error) {
   const backtestRangeLimit = normalizeBacktestRangeLimitError(error)
   if (backtestRangeLimit) return backtestRangeLimit
+  const insufficientCredits = normalizeInsufficientCreditsError(error)
+  if (insufficientCredits) return insufficientCredits
   if (!message) return ''
   const liveConflict = message.match(/Live strategy conflict: another running strategy already uses the same API key\/exchange\/market\/symbol \(([^)]+)\)\. Please stop strategy (\d+)(?: \((.+)\))? first\./i)
   if (liveConflict) {
@@ -213,6 +231,10 @@ request.interceptors.request.use(config => {
   // We keep both a custom header and the standard Accept-Language for compatibility.
   config.headers['X-App-Lang'] = lang
   config.headers['Accept-Language'] = lang
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (timezone) config.headers['X-App-Timezone'] = timezone
+  } catch (e) { /* use the saved server timezone or UTC */ }
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`

@@ -169,6 +169,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch, s
 import { init, registerIndicator, registerOverlay } from 'klinecharts'
 import request from '@/utils/request'
 import ExchangeKlineWs from '@/utils/exchangeWs'
+import { splitIndicatorPlotsByPane } from '@/utils/indicatorPlotGrouping'
 import { usePyodide } from '@/services/pyodide/usePyodide'
 import {
   calculateSMA,
@@ -4234,6 +4235,51 @@ registerOverlay({
           mainPaneOverlayCalcEntries.push(calc)
         }
       }
+      const buildCustomPlotBundle = (plots, fallbackNameForIndex) => {
+        const figures = []
+        const plotDataMap = {}
+        const lampBeltMeta = createLampBeltMeta(plots)
+        const renderPlots = plots
+          .map((plot, plotIdx) => ({ plot, plotIdx }))
+          .filter(({ plotIdx }) => !lampBeltMeta.hiddenIndexes.has(plotIdx))
+
+        for (const { plot, plotIdx } of renderPlots) {
+          const forceLamp = lampBeltMeta.laneByIndex.has(plotIdx)
+          const lampLane = lampBeltMeta.laneByIndex.get(plotIdx)
+          const fallbackName = typeof fallbackNameForIndex === 'function'
+            ? fallbackNameForIndex(plotIdx)
+            : `PLOT_${plotIdx}`
+          const { figureKey, figure, colorKey, sizeKey } = buildCustomPlotFigure(plot, plotIdx, fallbackName, {
+            forceLamp,
+            lampLane
+          })
+
+          figures.push(figure)
+          plotDataMap[figureKey] = normalizePlotDataSeries(plot.data, {
+            forceLamp,
+            lampLane
+          })
+          plotDataMap[colorKey] = extractPlotColorSeries(plot.data)
+          plotDataMap[sizeKey] = extractPlotSizeSeries(plot.data)
+        }
+
+        appendLampLaneLabelFigures(figures, plotDataMap, lampBeltMeta, internalData.length)
+        return {
+          figures,
+          plotDataMap,
+          lampBeltMeta,
+          lampBeltExtendData: createLampBeltExtendData(lampBeltMeta, figures)
+        }
+      }
+      const customPlotExtraConfig = (bundle, displayName) => bundle.lampBeltMeta.enabled
+        ? {
+            minValue: 1,
+            maxValue: bundle.lampBeltMeta.laneCount,
+            extendData: { lampBelt: bundle.lampBeltExtendData },
+            draw: createLampBeltDrawV2(displayName),
+            createTooltipDataSource: createLampBeltTooltip(displayName)
+          }
+        : {}
 
       for (let idx = 0; idx < props.activeIndicators.length; idx++) {
         const indicator = props.activeIndicators[idx]
@@ -4257,72 +4303,47 @@ registerOverlay({
                   const validPlots = allPlots.filter(plot => plot.data && Array.isArray(plot.data) && plot.data.length > 0)
 
                   if (validPlots.length > 0) {
-                    const figures = []
-                    const plotDataMap = {}
-                    const lampBeltMeta = createLampBeltMeta(validPlots)
-                    const renderPlots = validPlots
-                      .map((plot, plotIdx) => ({ plot, plotIdx }))
-                      .filter(({ plotIdx }) => !lampBeltMeta.hiddenIndexes.has(plotIdx))
-
-                    for (const { plot, plotIdx } of renderPlots) {
-                      const forceLamp = lampBeltMeta.laneByIndex.has(plotIdx)
-                      const lampLane = lampBeltMeta.laneByIndex.get(plotIdx)
-                      const { figureKey, figure, colorKey, sizeKey } = buildCustomPlotFigure(plot, plotIdx, `PLOT_${plotIdx}_${idx}`, {
-                        forceLamp,
-                        lampLane
-                      })
-
-                      figures.push(figure)
-                      plotDataMap[figureKey] = normalizePlotDataSeries(plot.data, {
-                        forceLamp,
-                        lampLane
-                      })
-                      plotDataMap[colorKey] = extractPlotColorSeries(plot.data)
-                      plotDataMap[sizeKey] = extractPlotSizeSeries(plot.data)
-                    }
-
-                    appendLampLaneLabelFigures(figures, plotDataMap, lampBeltMeta, internalData.length)
-                    const lampBeltExtendData = createLampBeltExtendData(lampBeltMeta, figures)
-                    const allOverlay = validPlots.every(plot => plot.overlay !== false)
                     let customIndicatorDisplayName = 'Custom Indicator'
                     if (renderResult.name) {
                       customIndicatorDisplayName = renderResult.name
                     }
-                    const renderSignature = hashCustomIndicatorSignature(JSON.stringify({
-                      version: CUSTOM_INDICATOR_RENDER_VERSION,
-                      code: indicator.code || '',
-                      plots: validPlots.map(plot => ({
-                        name: plot.name,
-                        title: plot.title,
-                        type: plot.type,
-                        overlay: plot.overlay,
-                        color: plot.color
-                      })),
-                      lampLaneCount: lampBeltMeta.laneCount
-                    }))
-                    const customIndicatorName = `${customIndicatorDisplayName}_${CUSTOM_INDICATOR_RENDER_VERSION}_${renderSignature}_${renderCycleId}`
-                    try {
-                      const registered = registerCustomIndicator(
-                        customIndicatorName,
-                        (kLineDataList) => buildAlignedPlotRows(internalData, plotDataMap, kLineDataList),
-                        figures,
-                        [],
-                        2,
-                        allOverlay,
-                        customIndicatorDisplayName,
-                        lampBeltMeta.enabled
-                          ? {
-                              minValue: 1,
-                              maxValue: lampBeltMeta.laneCount,
-                              extendData: { lampBelt: lampBeltExtendData },
-                              draw: createLampBeltDrawV2(customIndicatorDisplayName),
-                              createTooltipDataSource: createLampBeltTooltip(customIndicatorDisplayName)
-                            }
-                          : {}
-                      )
+                    const { overlayPlots, panePlots } = splitIndicatorPlotsByPane(validPlots)
+                    const plotGroups = [
+                      { plots: overlayPlots, shouldOverlay: true, groupName: 'overlay' },
+                      { plots: panePlots, shouldOverlay: false, groupName: 'pane' }
+                    ]
 
-                      if (registered) {
-                        if (allOverlay) {
+                    for (const group of plotGroups) {
+                      if (!group.plots.length) continue
+                      const bundle = buildCustomPlotBundle(group.plots, plotIdx => `PLOT_${plotIdx}_${idx}_${group.groupName}`)
+                      const renderSignature = hashCustomIndicatorSignature(JSON.stringify({
+                        version: CUSTOM_INDICATOR_RENDER_VERSION,
+                        code: indicator.code || '',
+                        group: group.groupName,
+                        plots: group.plots.map(plot => ({
+                          name: plot.name,
+                          title: plot.title,
+                          type: plot.type,
+                          overlay: plot.overlay,
+                          color: plot.color
+                        })),
+                        lampLaneCount: bundle.lampBeltMeta.laneCount
+                      }))
+                      const customIndicatorName = `${customIndicatorDisplayName}_${group.groupName}_${CUSTOM_INDICATOR_RENDER_VERSION}_${renderSignature}_${renderCycleId}`
+                      try {
+                        const registered = registerCustomIndicator(
+                          customIndicatorName,
+                          (kLineDataList) => buildAlignedPlotRows(internalData, bundle.plotDataMap, kLineDataList),
+                          bundle.figures,
+                          [],
+                          2,
+                          group.shouldOverlay,
+                          customIndicatorDisplayName,
+                          customPlotExtraConfig(bundle, customIndicatorDisplayName)
+                        )
+
+                        if (!registered) continue
+                        if (group.shouldOverlay) {
                           const paneId = chartRef.value.createIndicator(
                             customIndicatorName,
                             false,
@@ -4337,14 +4358,14 @@ registerOverlay({
                           const indicatorId = chartRef.value.createIndicator(
                             customIndicatorName,
                             false,
-                            getCustomPaneOptions(validPlots, lampBeltMeta)
+                            getCustomPaneOptions(group.plots, bundle.lampBeltMeta)
                           )
                           if (indicatorId) {
                             addedIndicatorIds.value.push({ paneId: indicatorId, name: customIndicatorName })
                           }
                         }
+                      } catch (plotErr) {
                       }
-                    } catch (plotErr) {
                     }
                   }
                 }
@@ -4370,90 +4391,66 @@ registerOverlay({
                   const validPlots = allPlots.filter(plot => plot.data && Array.isArray(plot.data) && plot.data.length > 0)
 
                   if (validPlots.length > 0) {
-                    const figures = []
-                    const plotDataMap = {}
-                    const lampBeltMeta = createLampBeltMeta(validPlots)
-                    const renderPlots = validPlots
-                      .map((plot, plotIdx) => ({ plot, plotIdx }))
-                      .filter(({ plotIdx }) => !lampBeltMeta.hiddenIndexes.has(plotIdx))
-
-                    for (const { plot, plotIdx } of renderPlots) {
-                      const forceLamp = lampBeltMeta.laneByIndex.has(plotIdx)
-                      const lampLane = lampBeltMeta.laneByIndex.get(plotIdx)
-                      const { figureKey, figure, colorKey, sizeKey } = buildCustomPlotFigure(plot, plotIdx, `PLOT_${plotIdx}`, {
-                        forceLamp,
-                        lampLane
-                      })
-
-                      figures.push(figure)
-                      plotDataMap[figureKey] = normalizePlotDataSeries(plot.data, {
-                        forceLamp,
-                        lampLane
-                      })
-                      plotDataMap[colorKey] = extractPlotColorSeries(plot.data)
-                      plotDataMap[sizeKey] = extractPlotSizeSeries(plot.data)
-                    }
-
-                    appendLampLaneLabelFigures(figures, plotDataMap, lampBeltMeta, internalData.length)
-                    const lampBeltExtendData = createLampBeltExtendData(lampBeltMeta, figures)
-                    const allOverlay = validPlots.every(plot => plot.overlay !== false)
                     let customIndicatorDisplayName = 'Custom Indicator'
                     if (renderResult.name) {
                       customIndicatorDisplayName = renderResult.name
                     }
-                    const renderSignature = hashCustomIndicatorSignature(JSON.stringify({
-                      version: CUSTOM_INDICATOR_RENDER_VERSION,
-                      code: indicator.code || '',
-                      plots: validPlots.map(plot => ({
-                        name: plot.name,
-                        title: plot.title,
-                        type: plot.type,
-                        overlay: plot.overlay,
-                        color: plot.color
-                      })),
-                      lampLaneCount: lampBeltMeta.laneCount
-                    }))
-                    const customIndicatorName = `${customIndicatorDisplayName}_${CUSTOM_INDICATOR_RENDER_VERSION}_${renderSignature}_${renderCycleId}`
+                    const { overlayPlots, panePlots } = splitIndicatorPlotsByPane(validPlots)
+                    const plotGroups = [
+                      { plots: overlayPlots, shouldOverlay: true, groupName: 'overlay' },
+                      { plots: panePlots, shouldOverlay: false, groupName: 'pane' }
+                    ]
 
-                    try {
-                      if (allOverlay) {
-                        addMainPaneOverlayEntry({
-                          signature: `${customIndicatorName}_${idx}`,
-                          figures,
-                          calc: (kLineDataList) => buildAlignedPlotRows(internalData, plotDataMap, kLineDataList)
-                        })
-                      } else {
-                        const registered = registerCustomIndicator(
-                          customIndicatorName,
-                          (kLineDataList) => buildAlignedPlotRows(internalData, plotDataMap, kLineDataList),
-                          figures,
-                          [],
-                          2,
-                          false,
-                          customIndicatorDisplayName,
-                          lampBeltMeta.enabled
-                            ? {
-                                minValue: 1,
-                                maxValue: lampBeltMeta.laneCount,
-                                extendData: { lampBelt: lampBeltExtendData },
-                                draw: createLampBeltDrawV2(customIndicatorDisplayName),
-                                createTooltipDataSource: createLampBeltTooltip(customIndicatorDisplayName)
-                              }
-                            : {}
-                        )
+                    for (const group of plotGroups) {
+                      if (!group.plots.length) continue
+                      const bundle = buildCustomPlotBundle(group.plots, plotIdx => `PLOT_${plotIdx}_${idx}_${group.groupName}`)
+                      const renderSignature = hashCustomIndicatorSignature(JSON.stringify({
+                        version: CUSTOM_INDICATOR_RENDER_VERSION,
+                        code: indicator.code || '',
+                        group: group.groupName,
+                        plots: group.plots.map(plot => ({
+                          name: plot.name,
+                          title: plot.title,
+                          type: plot.type,
+                          overlay: plot.overlay,
+                          color: plot.color
+                        })),
+                        lampLaneCount: bundle.lampBeltMeta.laneCount
+                      }))
+                      const customIndicatorName = `${customIndicatorDisplayName}_${group.groupName}_${CUSTOM_INDICATOR_RENDER_VERSION}_${renderSignature}_${renderCycleId}`
 
-                        if (registered) {
-                          const indicatorId = chartRef.value.createIndicator(
+                      try {
+                        if (group.shouldOverlay) {
+                          addMainPaneOverlayEntry({
+                            signature: `${customIndicatorName}_${idx}`,
+                            figures: bundle.figures,
+                            calc: (kLineDataList) => buildAlignedPlotRows(internalData, bundle.plotDataMap, kLineDataList)
+                          })
+                        } else {
+                          const registered = registerCustomIndicator(
                             customIndicatorName,
+                            (kLineDataList) => buildAlignedPlotRows(internalData, bundle.plotDataMap, kLineDataList),
+                            bundle.figures,
+                            [],
+                            2,
                             false,
-                            getCustomPaneOptions(validPlots, lampBeltMeta)
+                            customIndicatorDisplayName,
+                            customPlotExtraConfig(bundle, customIndicatorDisplayName)
                           )
-                          if (indicatorId) {
-                            addedIndicatorIds.value.push({ paneId: indicatorId, name: customIndicatorName })
+
+                          if (registered) {
+                            const indicatorId = chartRef.value.createIndicator(
+                              customIndicatorName,
+                              false,
+                              getCustomPaneOptions(group.plots, bundle.lampBeltMeta)
+                            )
+                            if (indicatorId) {
+                              addedIndicatorIds.value.push({ paneId: indicatorId, name: customIndicatorName })
+                            }
                           }
                         }
+                      } catch (plotErr) {
                       }
-                    } catch (plotErr) {
                     }
                   }
                 }

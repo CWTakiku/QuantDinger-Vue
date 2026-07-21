@@ -1584,7 +1584,9 @@ export default {
 
 .quick-trade-embedded.qt-embedded-ide {
   .qt-embedded-split--cols {
-    padding: 0 12px 12px;
+    // Child cards already use the same 14px outer margin as the symbol bar.
+    // Extra horizontal padding here made every section below it 24px narrower.
+    padding: 0 0 12px;
     gap: 14px;
   }
   .qt-embedded-split--cols .qt-embedded-col-left,

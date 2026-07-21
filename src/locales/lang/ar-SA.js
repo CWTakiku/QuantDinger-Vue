@@ -1700,6 +1700,7 @@ const locale = {
   "community.total": "Total",
   "community.totalProfit": "Total Profit",
   "community.totalReturn": "Return",
+  "community.annualReturn": "Annual Return",
   "community.tradeCount": "Trades",
   "community.updateComment": "Update Comment",
   "community.useBotPreset": "Configure & use",

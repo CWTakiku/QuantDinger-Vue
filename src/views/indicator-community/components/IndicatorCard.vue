@@ -71,6 +71,10 @@
           <div class="kpi-value" :class="returnToneClass">{{ formatPercent(indicator.total_return) }}</div>
         </div>
         <div class="kpi-cell">
+          <div class="kpi-label" :title="$t('community.annualReturn')">{{ $t('community.annualReturn') }}</div>
+          <div class="kpi-value" :class="annualReturnToneClass">{{ formatPercent(indicator.annual_return) }}</div>
+        </div>
+        <div class="kpi-cell">
           <div class="kpi-label">{{ $t('community.sharpe') }}</div>
           <div class="kpi-value" :class="sharpeToneClass">{{ formatNumber(indicator.sharpe, 2) }}</div>
         </div>
@@ -211,11 +215,18 @@ export default {
       const i = this.indicator
       return (i.sample_size || 0) > 0 ||
         parseFloat(i.total_return || 0) !== 0 ||
+        parseFloat(i.annual_return || 0) !== 0 ||
         parseFloat(i.sharpe || 0) !== 0 ||
         parseFloat(i.max_drawdown || 0) !== 0
     },
     returnToneClass () {
       const v = parseFloat(this.indicator.total_return) || 0
+      if (v > 0) return 'kpi-pos'
+      if (v < 0) return 'kpi-neg'
+      return ''
+    },
+    annualReturnToneClass () {
+      const v = parseFloat(this.indicator.annual_return) || 0
       if (v > 0) return 'kpi-pos'
       if (v < 0) return 'kpi-neg'
       return ''
@@ -577,9 +588,9 @@ export default {
 
     .card-kpi {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 4px;
-      padding: 6px 8px;
+      padding: 6px 4px;
       margin: 4px 0 8px;
       background: rgba(0, 0, 0, 0.025);
       border-radius: 6px;
@@ -593,6 +604,9 @@ export default {
         font-size: 10px;
         color: rgba(0, 0, 0, 0.4);
         line-height: 1.4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .kpi-value {

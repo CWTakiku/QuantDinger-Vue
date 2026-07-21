@@ -60,8 +60,16 @@ export default {
   },
   mounted () {
     this.loadCredits()
+    this.$root.$on('credits-updated', this.handleCreditsUpdated)
+  },
+  beforeDestroy () {
+    this.$root.$off('credits-updated', this.handleCreditsUpdated)
   },
   methods: {
+    handleCreditsUpdated (credits) {
+      const value = Number(credits)
+      if (Number.isFinite(value)) this.credits = value
+    },
     async loadCredits () {
       try {
         const res = await getMembershipPlans()

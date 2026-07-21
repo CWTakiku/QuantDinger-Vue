@@ -26,8 +26,12 @@
           class="market-asset-tabs"
           @change="handleMarketAssetTypeChange"
         >
-          <a-radio-button value="indicator">{{ $t('community.tabIndicators') }}</a-radio-button>
-          <a-radio-button value="script_template">{{ $t('community.tabScriptTemplates') }}</a-radio-button>
+          <a-radio-button value="indicator">
+            {{ $t('community.tabIndicators') }} ({{ marketAssetCounts.indicator }})
+          </a-radio-button>
+          <a-radio-button value="script_template">
+            {{ $t('community.tabScriptTemplates') }} ({{ marketAssetCounts.script_template }})
+          </a-radio-button>
         </a-radio-group>
       </div>
       <div class="header-right">
@@ -543,6 +547,10 @@ export default {
     return {
       loading: false,
       marketAssetType: 'indicator',
+      marketAssetCounts: {
+        indicator: 0,
+        script_template: 0
+      },
       indicators: [],
       filters: {
         keyword: '',
@@ -640,6 +648,16 @@ export default {
         if (res.code === 1) {
           this.indicators = res.data.items || []
           this.pagination.total = Number(res.data.total || 0)
+          const counts = res.data.asset_type_counts || {}
+          const currentTypeCount = this.pagination.total
+          this.marketAssetCounts = {
+            indicator: counts.indicator === undefined
+              ? (this.marketAssetType === 'indicator' ? currentTypeCount : this.marketAssetCounts.indicator)
+              : Number(counts.indicator || 0),
+            script_template: counts.script_template === undefined
+              ? (this.marketAssetType === 'script_template' ? currentTypeCount : this.marketAssetCounts.script_template)
+              : Number(counts.script_template || 0)
+          }
           // Keep current page in range if backend total changed.
           const totalPages = Math.max(1, Math.ceil(this.pagination.total / this.pagination.pageSize))
           if (this.pagination.current > totalPages) {

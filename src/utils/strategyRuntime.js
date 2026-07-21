@@ -48,6 +48,94 @@ export const strategySymbol = strategy => {
   return ''
 }
 
+export const strategyCapital = strategy => {
+  const config = strategyTradingConfig(strategy)
+  const candidates = [
+    strategy && strategy.initial_capital,
+    config.initial_capital,
+    config.initialCapital
+  ]
+  for (const value of candidates) {
+    const number = Number(value)
+    if (Number.isFinite(number) && number > 0) return number
+  }
+  return 0
+}
+
+export const strategyLeverage = strategy => {
+  const config = strategyTradingConfig(strategy)
+  const marketType = String(config.market_type || (strategy && strategy.market_type) || '').trim().toLowerCase()
+  if (marketType === 'spot') return 1
+  const candidates = [config.leverage, strategy && strategy.leverage]
+  for (const value of candidates) {
+    const number = Number(value)
+    if (Number.isFinite(number) && number >= 1) return number
+  }
+  return 1
+}
+
+export const strategyQuoteCurrency = strategy => {
+  const config = strategyTradingConfig(strategy)
+  const explicit = String(
+    config.quote_currency ||
+    config.quoteCurrency ||
+    (strategy && (strategy.quote_currency || strategy.quoteCurrency)) ||
+    ''
+  ).trim().toUpperCase()
+  if (explicit) return explicit
+
+  const rawSymbol = strategySymbol(strategy)
+  const instrument = rawSymbol.replace(/^[^:]+:/, '').replace(/@(spot|swap|future|futures)$/i, '')
+  if (instrument.includes('/')) {
+    const quote = instrument.split('/')[1]
+    if (quote) return quote.trim().toUpperCase()
+  }
+  if (/^USStock:/i.test(rawSymbol)) return 'USD'
+  if (/^CNStock:/i.test(rawSymbol)) return 'CNY'
+  if (/^HKStock:/i.test(rawSymbol)) return 'HKD'
+  return 'USDT'
+}
+
+export const summarizeStrategyPerformance = ({ strategy, curve = [], trades = [] } = {}) => {
+  const capital = strategyCapital(strategy)
+  const values = (Array.isArray(curve) ? curve : [])
+    .map(item => Number(item && (item.equity != null ? item.equity : item.value)))
+    .filter(Number.isFinite)
+  const fallbackPnl = Number(strategy && strategy.total_pnl)
+  const latestEquity = values.length
+    ? values[values.length - 1]
+    : capital + (Number.isFinite(fallbackPnl) ? fallbackPnl : 0)
+  const netPnl = capital > 0 ? latestEquity - capital : 0
+  const totalReturn = capital > 0 ? netPnl / capital : 0
+
+  let peak = capital > 0 ? capital : (values.length ? values[0] : 0)
+  let maxDrawdown = 0
+  values.forEach(value => {
+    if (value > peak) peak = value
+    if (peak > 0) maxDrawdown = Math.min(maxDrawdown, (value - peak) / peak)
+  })
+
+  const settledTrades = (Array.isArray(trades) ? trades : []).filter(trade => {
+    const type = String(trade && trade.type || '').toLowerCase()
+    return !type.startsWith('open') &&
+      !type.startsWith('add') &&
+      trade && trade.profit != null && trade.profit !== '' &&
+      Number.isFinite(Number(trade.profit))
+  })
+  const wins = settledTrades.filter(trade => Number(trade.profit) > 0).length
+
+  return {
+    capital,
+    latestEquity,
+    netPnl,
+    totalReturn,
+    maxDrawdown,
+    winRate: settledTrades.length ? wins / settledTrades.length : 0,
+    wins,
+    completedTrades: settledTrades.length
+  }
+}
+
 export const strategyLastActivity = strategy => {
   const config = strategyTradingConfig(strategy)
   return config.last_execution_time || config.last_signal_time || (strategy && strategy.updated_at) || (strategy && strategy.created_at) || ''

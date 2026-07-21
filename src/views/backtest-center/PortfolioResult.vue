@@ -18,6 +18,21 @@
       </div>
     </div>
 
+    <a-alert
+      v-if="result.liquidated"
+      type="error"
+      show-icon
+      class="liquidation-alert"
+      :message="$t('strategyV2.backtest.liquidatedTitle')"
+      :description="$t('strategyV2.backtest.liquidatedHint')" />
+    <a-alert
+      v-else-if="result.legacyInsolventContinuation"
+      type="error"
+      show-icon
+      class="liquidation-alert"
+      :message="$t('strategyV2.backtest.legacyInsolventTitle')"
+      :description="$t('strategyV2.backtest.legacyInsolventHint')" />
+
     <div class="metrics-grid">
       <div v-for="item in metrics" :key="item.key" class="metric-card">
         <span class="metric-label">
@@ -44,6 +59,9 @@
     <div v-if="result.executionAssumptions" class="assumption-strip">
       <div><span>{{ $t('strategyV2.backtest.engine') }}</span><strong>{{ $t('strategyV2.backtest.engineV2') }}</strong></div>
       <div><span>{{ $t('strategyV2.backtest.fillRule') }}</span><strong>{{ $t('strategyV2.backtest.fillRuleNextOpen') }}</strong></div>
+      <div><span>{{ $t('strategyV2.backtest.dateRange') }}</span><strong>{{ formatDateRange(result.executionAssumptions) }}</strong></div>
+      <div><span>{{ $t('backtest-center.initialCapital') }}</span><strong>{{ formatNumber(result.executionAssumptions.initialCapital) }}</strong></div>
+      <div><span>{{ $t('backtest-center.leverage') }}</span><strong>{{ formatLeverage(result.executionAssumptions) }}</strong></div>
       <div><span>{{ $t('backtest-center.commission') }}</span><strong>{{ formatRate(result.executionAssumptions.commission) }}</strong></div>
       <div><span>{{ $t('backtest-center.slippage') }}</span><strong>{{ formatRate(result.executionAssumptions.slippage) }}</strong></div>
     </div>
@@ -252,6 +270,7 @@ export default {
       return { ...source, feeDrag, orderStatus }
     },
     trustTone () {
+      if (this.result.liquidated || this.result.legacyInsolventContinuation) return 'is-error'
       if (!this.auditPassed) return 'is-error'
       return this.result.resultStatus === 'completed_trades' ? 'is-success' : 'is-warning'
     },
@@ -347,6 +366,7 @@ export default {
         { title: this.$t('strategyV2.backtest.side'), dataIndex: 'side', width: 70 },
         { title: this.$t('backtest-center.quantity'), dataIndex: 'quantity', customRender: value => this.formatNumber(value, 6) },
         { title: this.$t('backtest-center.price'), dataIndex: 'price', customRender: value => this.formatNumber(value, 4) },
+        { title: this.$t('strategyV2.backtest.filledNotional'), dataIndex: 'notional', customRender: (value, row) => this.formatNumber(value !== undefined && value !== null ? value : Number(row.quantity || 0) * Number(row.price || 0)) },
         { title: this.$t('backtest-center.commission'), dataIndex: 'commission', customRender: value => this.formatNumber(value, 4) },
         { title: this.$t('strategyV2.backtest.orderStatusLabel'), dataIndex: 'status' },
         { title: this.$t('strategyV2.backtest.reason'), dataIndex: 'reason', width: 145 }
@@ -367,10 +387,11 @@ export default {
         { title: this.$t('strategyV2.backtest.time'), dataIndex: 'eventTime', width: 165, customRender: this.formatDate },
         { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 165 },
         { title: this.$t('strategyV2.backtest.orderStatusLabel'), dataIndex: 'status', width: 90, customRender: value => this.$createElement('a-tag', { props: { color: this.statusColor(value) } }, this.$t(`strategyV2.backtest.orderStatus.${value}`)) },
-        { title: this.$t('strategyV2.backtest.statusReason'), dataIndex: 'statusReason', width: 180 },
+        { title: this.$t('strategyV2.backtest.statusReason'), dataIndex: 'statusReason', width: 180, customRender: this.formatStatusReason },
         { title: this.$t('strategyV2.backtest.requestedQuantity'), dataIndex: 'requestedQuantity', customRender: value => this.formatNumber(value, 6) },
         { title: this.$t('strategyV2.backtest.filledQuantity'), dataIndex: 'filledQuantity', customRender: value => this.formatNumber(value, 6) },
         { title: this.$t('backtest-center.price'), dataIndex: 'price', customRender: value => this.formatNumber(value, 4) },
+        { title: this.$t('strategyV2.backtest.filledNotional'), key: 'filledNotional', customRender: (value, row) => this.formatNumber(Number(row.filledQuantity || 0) * Number(row.price || 0)) },
         { title: this.$t('strategyV2.backtest.attempt'), dataIndex: 'attempt' }
       ]
     }
@@ -517,6 +538,22 @@ export default {
       }
     },
     formatDate (value) { return value ? moment(value).format('YYYY-MM-DD HH:mm') : '-' },
+    formatDateRange (assumptions) {
+      const start = assumptions && assumptions.startDate
+      const end = assumptions && assumptions.endDate
+      return start && end ? `${moment(start).format('YYYY-MM-DD')} ~ ${moment(end).format('YYYY-MM-DD')}` : '-'
+    },
+    formatLeverage (assumptions) {
+      const enabled = assumptions && assumptions.leverageEnabled
+      const leverage = enabled === false ? 1 : Number((assumptions && assumptions.leverage) || 1)
+      return `${Number.isFinite(leverage) ? leverage : 1}×`
+    },
+    formatStatusReason (value) {
+      if (!value) return '-'
+      const key = `strategyV2.backtest.statusReasonValue.${value}`
+      const translated = this.$t(key)
+      return translated === key ? String(value) : translated
+    },
     formatPercent (value, signed = true) { const number = Number(value || 0); return `${signed && number > 0 ? '+' : ''}${number.toFixed(2)}%` },
     formatRate (value) { return `${(Number(value || 0) * 100).toFixed(2)}%` },
     formatNumber (value, digits = 2) { const number = Number(value || 0); return Number.isFinite(number) ? number.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }) : '-' },
@@ -555,7 +592,7 @@ export default {
 .chart-heading span, .chart-legend-note { color: #7c8ca1; font-size: 11px; }
 .portfolio-chart { width: 100%; height: 590px; }
 .assumption-strip, .overview-grid, .status-grid { display: grid; gap: 8px; margin-top: 12px; }
-.assumption-strip { grid-template-columns: 1fr 1.8fr .8fr .8fr; }
+.assumption-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .assumption-strip div { padding: 9px 10px; border-radius: 8px; background: #f8fafc; }
 .assumption-strip span { display: block; color: #7c8ca1; font-size: 11px; }
 .assumption-strip strong { display: block; color: #334155; font-size: 11px; }
@@ -581,6 +618,7 @@ export default {
 .review-chart-shell /deep/ .kline-chart-container { height: auto !important; min-height: 0; }
 .portfolio-result.theme-dark .metric-card, .portfolio-result.theme-dark .overview-card, .portfolio-result.theme-dark .status-card, .portfolio-result.theme-dark .assumption-strip div { border-color: rgba(255,255,255,.1); background: #0d0d0d; }
 .portfolio-result.theme-dark .metric-card strong, .portfolio-result.theme-dark .overview-card strong, .portfolio-result.theme-dark .status-card strong, .portfolio-result.theme-dark .chart-heading h3, .portfolio-result.theme-dark .assumption-strip strong { color: #e5e7eb; }
+.liquidation-alert { margin-top: 12px; }
 .portfolio-result.theme-dark .chart-card { border-color: rgba(255,255,255,.1); }
 .portfolio-result.theme-dark .result-trustbar.is-success { border-color: #315d22; background: #13200f; color: #73d13d; }
 .portfolio-result.theme-dark .result-trustbar.is-warning { border-color: #664d03; background: #211b08; color: #ffc53d; }
