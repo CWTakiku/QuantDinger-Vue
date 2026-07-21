@@ -7,11 +7,17 @@
         <span>{{ statusHint }}</span>
       </div>
       <div>
-        <a-tag :color="auditPassed ? 'green' : 'red'">{{ auditPassed ? $t('strategyV2.backtest.auditPassed') : $t('strategyV2.backtest.auditFailed') }}</a-tag>
-        <a-tag color="blue">{{ $t('strategyV2.backtest.marketData') }}</a-tag>
+        <a-tag
+          :color="auditPassed ? 'green' : 'red'"
+          class="trust-tag"
+          :class="auditPassed ? 'trust-tag--success' : 'trust-tag--error'">
+          {{ auditPassed ? $t('strategyV2.backtest.auditPassed') : $t('strategyV2.backtest.auditFailed') }}
+        </a-tag>
+        <a-tag color="blue" class="trust-tag trust-tag--info">{{ $t('strategyV2.backtest.marketData') }}</a-tag>
         <a-tag
           v-if="legacyBackfilled"
           color="orange"
+          class="trust-tag trust-tag--warning"
           :title="$t('strategyV2.backtest.legacyBackfillHint')">
           {{ $t('strategyV2.backtest.legacyBackfill') }}
         </a-tag>
@@ -624,6 +630,11 @@ export default {
 .portfolio-result.theme-dark .result-trustbar.is-warning { border-color: #664d03; background: #211b08; color: #ffc53d; }
 .portfolio-result.theme-dark .result-trustbar.is-error { border-color: #6b2525; background: #251111; color: #ff7875; }
 .portfolio-result.theme-dark .result-trustbar span { color: rgba(255, 255, 255, .56); }
+.portfolio-result.theme-dark .result-trustbar /deep/ .trust-tag { font-weight: 500; }
+.portfolio-result.theme-dark .result-trustbar /deep/ .trust-tag--success { border-color: #315d22; background: rgba(82, 196, 26, .18); color: #b7eb8f; }
+.portfolio-result.theme-dark .result-trustbar /deep/ .trust-tag--error { border-color: #6b2525; background: rgba(255, 77, 79, .18); color: #ffa39e; }
+.portfolio-result.theme-dark .result-trustbar /deep/ .trust-tag--info { border-color: #164c7e; background: rgba(24, 144, 255, .18); color: #91d5ff; }
+.portfolio-result.theme-dark .result-trustbar /deep/ .trust-tag--warning { border-color: #664d03; background: rgba(250, 173, 20, .18); color: #ffe58f; }
 @media (max-width: 1500px) { .metrics-grid { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 900px) { .metrics-grid, .overview-grid, .status-grid, .assumption-strip { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 720px) { .result-trustbar { align-items: flex-start; flex-direction: column; }.result-trustbar > div { flex-wrap: wrap; } }
