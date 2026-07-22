@@ -301,6 +301,8 @@ import * as echarts from 'echarts'
 import moment from 'moment'
 import { mapState } from 'vuex'
 import { calculateTradeValueUsd } from '@/utils/tradeReview'
+import { timestampMillisecondsUtc } from '@/utils/utcInstant'
+import { formatBacktestTime } from '@/utils/userTime'
 import {
   compileScriptSource,
   getScriptSourceDetail,
@@ -591,8 +593,8 @@ export default {
           this.chartResizeObserver.observe(this.$refs.equityChart)
         }
       }
-      const strategyData = this.equityPoints.map(item => [moment(item.time).valueOf(), Number(item.value)])
-      const benchmarkData = ((this.result && this.result.benchmarkCurve) || []).map(item => [moment(item.time).valueOf(), Number(item.value)])
+      const strategyData = this.equityPoints.map(item => [timestampMillisecondsUtc(item.time), Number(item.value)])
+      const benchmarkData = ((this.result && this.result.benchmarkCurve) || []).map(item => [timestampMillisecondsUtc(item.time), Number(item.value)])
       const textColor = this.isDarkTheme ? '#a3a3a3' : '#64748b'
       const gridColor = this.isDarkTheme ? '#292929' : '#e9eef4'
       const strategyName = this.$t('strategyV2.backtest.strategyEquity')
@@ -637,7 +639,7 @@ export default {
             if (!params || !params.length) return ''
             const timestamp = params[0].value[0]
             const rows = params.map(item => `${item.marker}${item.seriesName}<b>${this.formatNumber(item.value[1])}</b>`).join('<br>')
-            return `<div class="backtest-tooltip"><strong>${moment(timestamp).format('YYYY-MM-DD HH:mm')}</strong><span>${valueLabel}</span><br>${rows}</div>`
+            return `<div class="backtest-tooltip"><strong>${formatBacktestTime(timestamp, { locale: this.$i18n.locale })}</strong><span>${valueLabel}</span><br>${rows}</div>`
           }
         },
         axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -973,7 +975,7 @@ export default {
       return 'neutral'
     },
     formatDate (value) {
-      return value ? moment(value).format('YYYY-MM-DD HH:mm') : '-'
+      return formatBacktestTime(value, { locale: this.$i18n.locale, fallback: '-' })
     },
     historyStatusLabel (item) {
       return this.$t(`strategyV2.backtest.status.${item.result_status || 'unknown'}`)

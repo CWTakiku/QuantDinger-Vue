@@ -37,6 +37,16 @@ test('builds a bounded historical window around the selected trade', () => {
   assert.ok(result.limit <= 1000)
 })
 
+test('treats legacy timezone-less backtest times as UTC instants', () => {
+  const result = buildTradeReviewWindow({
+    entry_time: '2026-07-20 12:00:00',
+    exit_time: '2026-07-20 14:00:00'
+  }, '1H')
+
+  assert.equal(result.entryTime, Date.parse('2026-07-20T12:00:00Z'))
+  assert.equal(result.exitTime, Date.parse('2026-07-20T14:00:00Z'))
+})
+
 test('uses the finest timeframe that can include both trade markers', () => {
   const trade = {
     entry_time: '2026-07-03T21:15:00Z',

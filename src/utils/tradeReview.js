@@ -1,3 +1,5 @@
+import { timestampMillisecondsUtc } from './utcInstant.js'
+
 const TIMEFRAME_ALIASES = {
   '1m': '1m',
   '3m': '3m',
@@ -26,15 +28,6 @@ const REVIEW_TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1H', '4H', '1D', '1W
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value))
 
-const timestampMilliseconds = (value) => {
-  if (value === null || value === undefined || value === '') return null
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value < 100000000000 ? value * 1000 : value
-  }
-  const parsed = Date.parse(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
 export const normalizeReviewTimeframe = (value) => {
   const normalized = String(value || '1d').trim().toLowerCase()
   return TIMEFRAME_ALIASES[normalized] || normalized
@@ -54,8 +47,8 @@ export const resolveTradeReviewTimeframe = (trade = {}, timeframeValue = '1D', m
   const requested = normalizeReviewTimeframe(timeframeValue)
   const startIndex = REVIEW_TIMEFRAMES.indexOf(requested)
   const normalized = startIndex >= 0 ? requested : '1D'
-  const entryTime = timestampMilliseconds(trade.entry_time)
-  const exitTime = timestampMilliseconds(trade.exit_time)
+  const entryTime = timestampMillisecondsUtc(trade.entry_time)
+  const exitTime = timestampMillisecondsUtc(trade.exit_time)
   if (entryTime === null || exitTime === null) return normalized
 
   const duration = Math.abs(exitTime - entryTime)
@@ -73,8 +66,8 @@ export const resolveTradeReviewTimeframe = (trade = {}, timeframeValue = '1D', m
 export const buildTradeReviewWindow = (trade = {}, timeframeValue = '1D') => {
   const timeframe = normalizeReviewTimeframe(timeframeValue)
   const interval = TIMEFRAME_MILLISECONDS[timeframe] || TIMEFRAME_MILLISECONDS['1D']
-  const entryTime = timestampMilliseconds(trade.entry_time)
-  const exitTime = timestampMilliseconds(trade.exit_time)
+  const entryTime = timestampMillisecondsUtc(trade.entry_time)
+  const exitTime = timestampMillisecondsUtc(trade.exit_time)
   if (entryTime === null || exitTime === null) {
     return { beforeTime: null, limit: 480, entryTime, exitTime }
   }

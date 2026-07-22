@@ -226,6 +226,8 @@ import {
   findNearestBarIndex,
   resolveTradeReviewTimeframe
 } from '@/utils/tradeReview'
+import { timestampMillisecondsUtc } from '@/utils/utcInstant'
+import { formatBacktestTime } from '@/utils/userTime'
 
 export default {
   name: 'PortfolioResult',
@@ -430,7 +432,7 @@ export default {
       const firstValue = Number(curve[0].value || 0)
       const base = this.initialCapital > 0 ? this.initialCapital : (firstValue > 0 ? firstValue : 1)
       let peak = base
-      const normalized = curve.map(item => [moment(item.time).valueOf(), Number(item.value) / base * 100])
+      const normalized = curve.map(item => [timestampMillisecondsUtc(item.time), Number(item.value) / base * 100])
       const drawdown = curve.map(item => {
         const value = Number(item.value)
         peak = Math.max(peak, value)
@@ -438,14 +440,14 @@ export default {
         const pointDrawdown = item.drawdown !== undefined && item.drawdown !== null && Number.isFinite(savedDrawdown)
           ? savedDrawdown
           : ((value / peak - 1) * 100)
-        return [moment(item.time).valueOf(), pointDrawdown]
+        return [timestampMillisecondsUtc(item.time), pointDrawdown]
       })
       const benchmarkRaw = this.result.benchmarkCurve || []
       const benchmarkBase = benchmarkRaw.length ? Number(benchmarkRaw[0].value || 1) : 1
-      const benchmark = benchmarkRaw.map(item => [moment(item.time).valueOf(), Number(item.value) / benchmarkBase * 100])
-      const cash = curve.map(item => [moment(item.time).valueOf(), Number(item.cash || 0)])
-      const gross = curve.map(item => [moment(item.time).valueOf(), Number(item.grossExposure || 0) * 100])
-      const net = curve.map(item => [moment(item.time).valueOf(), Number(item.netExposure || 0) * 100])
+      const benchmark = benchmarkRaw.map(item => [timestampMillisecondsUtc(item.time), Number(item.value) / benchmarkBase * 100])
+      const cash = curve.map(item => [timestampMillisecondsUtc(item.time), Number(item.cash || 0)])
+      const gross = curve.map(item => [timestampMillisecondsUtc(item.time), Number(item.grossExposure || 0) * 100])
+      const net = curve.map(item => [timestampMillisecondsUtc(item.time), Number(item.netExposure || 0) * 100])
       const text = this.isDark ? '#8c8c8c' : '#64748b'
       const grid = this.isDark ? '#242424' : '#e8edf3'
       const strategyName = this.$t('strategyV2.backtest.strategyNormalized')
@@ -546,7 +548,9 @@ export default {
         chart.scrollToTimestamp(Math.round((entryTime + exitTime) / 2), 0)
       }
     },
-    formatDate (value) { return value ? moment(value).format('YYYY-MM-DD HH:mm') : '-' },
+    formatDate (value) {
+      return formatBacktestTime(value, { locale: this.$i18n.locale, fallback: '-' })
+    },
     formatDateRange (assumptions) {
       const start = assumptions && assumptions.startDate
       const end = assumptions && assumptions.endDate

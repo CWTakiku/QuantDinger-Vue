@@ -1,5 +1,8 @@
 import storage from 'store'
 import { USER_INFO } from '@/store/mutation-types'
+import { parseUtcAwareInstant } from './utcInstant.js'
+
+export { parseUtcAwareInstant } from './utcInstant.js'
 
 /** Return trimmed IANA id if valid, else '' */
 export function normalizeIanaTimezone (tz) {
@@ -75,35 +78,10 @@ export function formatUserDateTime (input, opts = {}) {
 }
 
 /**
- * Parse API timestamps that are UTC instants but may lack a ``Z`` suffix.
- */
-export function parseUtcAwareInstant (input) {
-  if (input == null || input === '') return null
-  if (input instanceof Date) {
-    return isNaN(input.getTime()) ? null : input
-  }
-  if (typeof input === 'string') {
-    const s = input.trim()
-    if (!s) return null
-    const isNaive = /^\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(s) &&
-      !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)
-    if (isNaive) {
-      let iso = s.replace(/\//g, '-').replace(' ', 'T')
-      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(iso)) iso += ':00'
-      const d = new Date(iso + 'Z')
-      return isNaN(d.getTime()) ? null : d
-    }
-    return parseToDate(s)
-  }
-  return parseToDate(input)
-}
-
-/**
  * Format a backtest trade timestamp.
  *
- * Backend writes trade times via `timestamp.strftime('%Y-%m-%d %H:%M')` on
- * UTC-indexed pandas DataFrames from the unified V2 backtest service.
- * That string carries no tz info, but its value IS UTC. `new Date(s)` would
+ * Older backtest payloads wrote UTC-indexed pandas timestamps without a
+ * timezone suffix. That string carries no tz info, but its value IS UTC. `new Date(s)` would
  * interpret it as browser-local, producing a wrong wall clock for any user
  * outside UTC (e.g. CN users see "8 hours late").
  *
