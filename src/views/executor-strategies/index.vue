@@ -69,7 +69,7 @@
               <label>{{ t('executorStrategies.side') }}</label>
               <a-radio-group v-model="form.side" class="compact-segmented" button-style="solid" @change="handleSideChange">
                 <a-radio-button value="long">{{ t('executorStrategies.long') }}</a-radio-button>
-                <a-radio-button value="short" :disabled="form.market_type === 'spot'">{{ t('executorStrategies.short') }}</a-radio-button>
+                <a-radio-button v-if="!isDca" value="short" :disabled="form.market_type === 'spot'">{{ t('executorStrategies.short') }}</a-radio-button>
                 <a-radio-button
                   v-if="form.executor_type === 'grid'"
                   value="neutral"
@@ -85,11 +85,17 @@
                 class="compact-segmented"
                 button-style="solid"
                 @change="handleMarketTypeChange">
-                <a-radio-button value="swap">{{ t('executorStrategies.swap') }}</a-radio-button>
+                <a-radio-button v-if="!isDca" value="swap">{{ t('executorStrategies.swap') }}</a-radio-button>
                 <a-radio-button value="spot">{{ t('executorStrategies.spot') }}</a-radio-button>
               </a-radio-group>
             </div>
           </div>
+          <a-alert
+            v-if="isDca"
+            class="dca-market-notice"
+            type="success"
+            show-icon
+            :message="t('executorStrategies.dcaSpotLongOnly')" />
 
           <div v-if="!embedded" class="field-block">
             <label>{{ t('executorStrategies.executionMode') }}</label>
@@ -294,7 +300,7 @@
               :message="t('executorStrategies.dcaExplainerTitle')"
               :description="t('executorStrategies.dcaExplainerDesc', {
                 orders: form.dca_max_orders,
-                interval: form.dca_interval_bars,
+                interval: dcaIntervalText(form.dca_interval_minutes),
                 allocation: fmtPct(dcaOrderPct)
               })" />
             <div class="field-grid">
@@ -304,9 +310,16 @@
                 <small class="field-hint">{{ t('executorStrategies.dcaMaxOrdersHint') }}</small>
               </div>
               <div class="field-block">
-                <label>{{ t('executorStrategies.dcaIntervalBars') }}</label>
-                <a-input-number v-model="form.dca_interval_bars" :min="1" :max="100000" style="width: 100%" />
-                <small class="field-hint">{{ t('executorStrategies.dcaIntervalBarsHint', { timeframe: form.timeframe }) }}</small>
+                <label>{{ t('executorStrategies.dcaInterval') }}</label>
+                <a-select v-model="form.dca_interval_minutes">
+                  <a-select-option
+                    v-for="option in dcaIntervalOptions"
+                    :key="option.value"
+                    :value="option.value">
+                    {{ option.label }}
+                  </a-select-option>
+                </a-select>
+                <small class="field-hint">{{ t('executorStrategies.dcaIntervalHint') }}</small>
               </div>
             </div>
             <div class="field-grid">
@@ -530,7 +543,7 @@
           <a-collapse class="advanced-collapse" :bordered="false">
             <a-collapse-panel key="advanced" :header="t('executorStrategies.advanced')">
               <div class="field-grid">
-                <div class="field-block">
+                <div v-if="!isDca" class="field-block">
                   <label>{{ t('executorStrategies.samplingInterval') }}</label>
                   <a-select v-model="form.timeframe">
                     <a-select-option value="1m">1m</a-select-option>
@@ -698,13 +711,24 @@ export default {
       const orders = Math.max(1, Number(this.form.dca_max_orders || 1))
       return Math.max(0, Number(this.form.dca_total_budget_pct || 0)) / orders
     },
+    dcaIntervalOptions () {
+      return [
+        { value: 60, label: this.t('executorStrategies.dcaInterval.hour1') },
+        { value: 240, label: this.t('executorStrategies.dcaInterval.hour4') },
+        { value: 720, label: this.t('executorStrategies.dcaInterval.hour12') },
+        { value: 1440, label: this.t('executorStrategies.dcaInterval.day1') },
+        { value: 10080, label: this.t('executorStrategies.dcaInterval.week1') },
+        { value: 20160, label: this.t('executorStrategies.dcaInterval.week2') },
+        { value: 43200, label: this.t('executorStrategies.dcaInterval.day30') }
+      ]
+    },
     summaryCards () {
       if (this.isDca) {
         const config = (this.preview && this.preview.config) || {}
         return [
           { key: 'orders', label: this.t('executorStrategies.summary.orders'), value: Number(this.summary.level_count || 0) },
           { key: 'budget', label: this.t('executorStrategies.summary.budget'), value: this.fmtPct(config.dca_total_budget_pct) },
-          { key: 'interval', label: this.t('executorStrategies.summary.interval'), value: this.t('executorStrategies.summary.intervalValue', { count: Number(config.dca_interval_bars || 0) }) },
+          { key: 'interval', label: this.t('executorStrategies.summary.interval'), value: this.dcaIntervalText(config.dca_interval_minutes) },
           { key: 'perOrder', label: this.t('executorStrategies.summary.perOrder'), value: this.fmtPct(config.dca_order_pct) }
         ]
       }
@@ -735,7 +759,7 @@ export default {
         if (start <= 0 || end <= 0 || start === end) issues.push('priceBounds')
       } else if (this.isDca) {
         if (Number(this.form.dca_max_orders || 0) < 1) issues.push('dcaMaxOrders')
-        if (Number(this.form.dca_interval_bars || 0) < 1) issues.push('dcaIntervalBars')
+        if (Number(this.form.dca_interval_minutes || 0) < 1) issues.push('dcaInterval')
         const budget = Number(this.form.dca_total_budget_pct || 0)
         if (budget <= 0 || budget > 1) issues.push('dcaBudget')
         if (this.form.dca_price_filter_enabled && Number(this.form.dca_max_adverse_price_pct || 0) < 0) {
@@ -832,7 +856,7 @@ export default {
           { title: this.t('executorStrategies.table.action'), dataIndex: 'action', scopedSlots: { customRender: 'action' }, width: 110 },
           { title: this.t('executorStrategies.table.side'), dataIndex: 'side', scopedSlots: { customRender: 'side' }, width: 100 },
           { title: this.t('executorStrategies.table.amount'), dataIndex: 'amount_quote', scopedSlots: { customRender: 'money' }, width: 150 },
-          { title: this.t('executorStrategies.table.scheduledBar'), dataIndex: 'scheduled_bar', customRender: value => this.t('executorStrategies.table.scheduledBarValue', { count: Number(value || 0) }), width: 160 },
+          { title: this.t('executorStrategies.table.scheduledTime'), dataIndex: 'scheduled_offset_minutes', customRender: (value, row) => this.dcaScheduledText(value, row), width: 160 },
           { title: this.t('executorStrategies.table.cumulativeBudget'), dataIndex: 'cumulative_amount_quote', customRender: value => this.fmtPct(value), width: 170 }
         ]
       }
@@ -892,7 +916,7 @@ export default {
         initial_position_pct: 0.6,
         min_spread_between_orders: 0.0005,
         entry_price: 1,
-        dca_interval_bars: 60,
+        dca_interval_minutes: 1440,
         dca_max_orders: 5,
         dca_total_budget_pct: 1,
         dca_price_filter_enabled: false,
@@ -966,6 +990,7 @@ export default {
       this.form.executor_type = type
       if (type !== 'grid' && this.form.side === 'neutral') this.form.side = 'long'
       this.applyTypeDefaults()
+      this.enforceDcaConstraints()
     },
     applyTypeDefaults () {
       const template = this.templateForType(this.form.executor_type)
@@ -976,7 +1001,9 @@ export default {
           executor_type: this.form.executor_type,
           strategy_name: this.form.strategy_name,
           symbol: this.form.symbol,
-          timeframe: this.form.timeframe || '1m'
+          timeframe: this.form.executor_type === 'dca'
+            ? (template.defaults.timeframe || '1H')
+            : (this.form.timeframe || '1m')
         }
       }
       if (this.form.executor_type === 'martingale') {
@@ -985,6 +1012,13 @@ export default {
       if (this.form.executor_type === 'layered_martingale') {
         this.form.volume_multiplier = Math.max(Number(this.form.volume_multiplier || 1), 1.8)
       }
+      this.enforceDcaConstraints()
+    },
+    enforceDcaConstraints () {
+      if (!this.isDca) return
+      this.form.side = 'long'
+      this.form.market_type = 'spot'
+      this.form.timeframe = '1H'
     },
     handleMarketTypeChange () {
       if (this.form.market_type === 'spot') {
@@ -1011,6 +1045,11 @@ export default {
     payload () {
       const credential = this.form.execution_mode === 'live' ? this.selectedCredential : null
       const templateConfig = { ...this.form }
+      if (this.isDca) {
+        templateConfig.side = 'long'
+        templateConfig.market_type = 'spot'
+        templateConfig.timeframe = '1H'
+      }
       delete templateConfig.initial_capital
       delete templateConfig.leverage
       return {
@@ -1107,6 +1146,32 @@ export default {
     },
     fmtPct (value) {
       return `${(Number(value || 0) * 100).toFixed(2)}%`
+    },
+    dcaIntervalText (value) {
+      const minutes = Number(value || 0)
+      const option = this.dcaIntervalOptions.find(item => item.value === minutes)
+      return option ? option.label : this.t('executorStrategies.dcaInterval.custom', { minutes })
+    },
+    dcaDurationText (value) {
+      const minutes = Math.max(0, Number(value || 0))
+      if (minutes >= 10080 && minutes % 10080 === 0) {
+        return this.t('executorStrategies.dcaDuration.weeks', { count: minutes / 10080 })
+      }
+      if (minutes >= 1440 && minutes % 1440 === 0) {
+        return this.t('executorStrategies.dcaDuration.days', { count: minutes / 1440 })
+      }
+      if (minutes >= 60 && minutes % 60 === 0) {
+        return this.t('executorStrategies.dcaDuration.hours', { count: minutes / 60 })
+      }
+      return this.t('executorStrategies.dcaDuration.minutes', { count: minutes })
+    },
+    dcaScheduledText (value, row) {
+      if (Number((row && row.order_index) || 0) <= 1) {
+        return this.t('executorStrategies.table.scheduledImmediately')
+      }
+      return this.t('executorStrategies.table.scheduledAfter', {
+        interval: this.dcaDurationText(value)
+      })
     }
   }
 }
@@ -1394,6 +1459,7 @@ export default {
   margin-top: 10px;
 }
 
+.dca-market-notice,
 .layered-explainer,
 .dca-explainer {
   margin-bottom: 10px;

@@ -43,7 +43,7 @@
         v-for="(log, idx) in displayLogs"
         :key="idx"
         class="log-entry"
-        :class="'level-' + log.level"
+        :class="'level-' + normalizeLogLevel(log.level)"
       >
         <span class="log-time">{{ formatTime(log.timestamp) }}</span>
         <a-tag :color="getLevelColor(log.level)" size="small" class="log-level">
@@ -80,12 +80,13 @@ export default {
         { value: 'all', label: this.$t('trading-assistant.logs.level.all') || 'All', icon: 'bars' },
         { value: 'trade', label: this.$t('trading-assistant.logs.level.trade'), icon: 'transaction' },
         { value: 'signal', label: this.$t('trading-assistant.logs.level.signal'), icon: 'notification' },
+        { value: 'warning', label: this.$t('trading-assistant.logs.level.warn'), icon: 'exclamation-circle' },
         { value: 'error', label: this.$t('trading-assistant.logs.level.error'), icon: 'warning' }
       ]
     },
     filteredLogs () {
       if (this.filterLevel === 'all') return this.logs
-      return this.logs.filter(l => l.level === this.filterLevel)
+      return this.logs.filter(l => this.normalizeLogLevel(l.level) === this.filterLevel)
     },
     /** Newest entries first (API returns id DESC). */
     displayLogs () {
@@ -146,7 +147,7 @@ export default {
     },
 
     countByLevel (level) {
-      return this.logs.filter(l => l.level === level).length
+      return this.logs.filter(l => this.normalizeLogLevel(l.level) === level).length
     },
 
     formatTime (ts) {
@@ -161,14 +162,20 @@ export default {
     },
 
     getLevelColor (level) {
-      const map = { info: 'blue', warn: 'orange', error: 'red', trade: 'green', signal: 'purple' }
-      return map[level] || 'default'
+      const map = { info: 'blue', warning: 'orange', error: 'red', trade: 'green', signal: 'purple' }
+      return map[this.normalizeLogLevel(level)] || 'default'
     },
 
     getLevelText (level) {
-      const key = `trading-assistant.logs.level.${level}`
+      const normalized = this.normalizeLogLevel(level)
+      const key = `trading-assistant.logs.level.${normalized === 'warning' ? 'warn' : normalized}`
       const translated = this.$t(key)
-      return translated !== key ? translated : level
+      return translated !== key ? translated : normalized
+    },
+
+    normalizeLogLevel (level) {
+      const normalized = String(level || 'info').trim().toLowerCase()
+      return normalized === 'warn' ? 'warning' : normalized
     }
   }
 }
@@ -288,6 +295,22 @@ export default {
     }
   }
 
+  // Warning
+  &.tab-warning {
+    color: #d48806;
+    background: #fffbe6;
+    border-color: #ffe58f;
+    .tab-count { background: #ffe58f; color: #ad6800; }
+    &:hover { background: #fff7cc; }
+    &.active {
+      color: #fff;
+      background: linear-gradient(135deg, #faad14, #d48806);
+      border-color: transparent;
+      box-shadow: 0 2px 8px rgba(250, 173, 20, 0.35);
+      .tab-count { background: rgba(255, 255, 255, 0.3); color: #fff; }
+    }
+  }
+
   // Error
   &.tab-error {
     color: #cf1322;
@@ -346,6 +369,10 @@ export default {
 
   &.level-error {
     background: rgba(255, 77, 79, 0.04);
+  }
+
+  &.level-warning {
+    background: rgba(250, 173, 20, 0.06);
   }
 
   &.level-trade {
@@ -419,6 +446,20 @@ export default {
         .tab-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
       }
     }
+    &.tab-warning {
+      color: #ffc53d;
+      background: rgba(250, 173, 20, 0.08);
+      border-color: rgba(250, 173, 20, 0.22);
+      .tab-count { background: rgba(250, 173, 20, 0.16); color: #ffc53d; }
+      &:hover { background: rgba(250, 173, 20, 0.14); }
+      &.active {
+        color: #fff;
+        background: linear-gradient(135deg, #faad14, #d48806);
+        border-color: transparent;
+        box-shadow: 0 2px 10px rgba(250, 173, 20, 0.4);
+        .tab-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
+      }
+    }
     &.tab-error {
       color: #ff7875;
       background: rgba(255, 77, 79, 0.08);
@@ -459,6 +500,10 @@ export default {
 
     &.level-error {
       background: rgba(255, 77, 79, 0.06);
+    }
+
+    &.level-warning {
+      background: rgba(250, 173, 20, 0.08);
     }
 
     &.level-trade {

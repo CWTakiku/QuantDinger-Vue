@@ -323,6 +323,10 @@ export default {
         })
         if (res && res.code === 1) {
           this.report = res.data || null
+          const billing = this.report && this.report.billing
+          if (billing && typeof billing.remaining !== 'undefined') {
+            this.$root.$emit('credits-updated', billing.remaining)
+          }
           this.selectedHistoryId = this.report && this.report.history_id ? this.report.history_id : null
           this.loadHistory()
         } else {
