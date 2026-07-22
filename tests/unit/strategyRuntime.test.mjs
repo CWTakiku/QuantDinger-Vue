@@ -14,6 +14,12 @@ import {
   strategySymbol,
   summarizeStrategyPerformance
 } from '../../src/utils/strategyRuntime.js'
+import {
+  normalizeStrategyLogLevel,
+  STRATEGY_LOG_FILTERS,
+  strategyLogLevelKey
+} from '../../src/utils/strategyLogs.js'
+import strategyLiveRiskMessages from '../../src/locales/lang/strategy-live-risk.js'
 
 const rows = [
   {
@@ -123,4 +129,30 @@ test('filters and sorts running strategies before stopped strategies', () => {
   const filtered = filterAndSortStrategies(rows, { keyword: 'live', status: 'running', executionMode: 'live' })
   assert.deepEqual(filtered.map(item => item.id), [2, 3])
   assert.deepEqual(filterAndSortStrategies(rows).map(item => item.id), [2, 3, 1])
+})
+
+test('keeps warning logs visible and filterable before errors', () => {
+  assert.deepEqual(
+    STRATEGY_LOG_FILTERS.map(item => item.value),
+    ['all', 'trade', 'signal', 'warning', 'error']
+  )
+  assert.equal(normalizeStrategyLogLevel('warn'), 'warning')
+  assert.equal(normalizeStrategyLogLevel('warning'), 'warning')
+  assert.equal(strategyLogLevelKey('warn'), 'trading-assistant.logs.level.warning')
+})
+
+test('translates strategy log controls in every supported locale', () => {
+  const requiredKeys = [
+    'trading-assistant.logs.level.warning',
+    'trading-assistant.logs.level.error',
+    'trading-assistant.logs.autoRefresh',
+    'trading-assistant.logs.noLogs'
+  ]
+  assert.deepEqual(Object.keys(strategyLiveRiskMessages).sort(), [
+    'ar-SA', 'de-DE', 'en-US', 'fr-FR', 'ja-JP', 'ko-KR',
+    'ru-RU', 'th-TH', 'vi-VN', 'zh-CN', 'zh-TW'
+  ])
+  Object.values(strategyLiveRiskMessages).forEach(messages => {
+    requiredKeys.forEach(key => assert.ok(messages[key], `missing ${key}`))
+  })
 })

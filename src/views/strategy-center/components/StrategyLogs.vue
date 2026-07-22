@@ -46,9 +46,12 @@
         :class="'level-' + normalizeLogLevel(log.level)"
       >
         <span class="log-time">{{ formatTime(log.timestamp) }}</span>
-        <a-tag :color="getLevelColor(log.level)" size="small" class="log-level">
+        <span
+          class="log-level"
+          :class="'log-level-' + normalizeLogLevel(log.level)"
+        >
           {{ getLevelText(log.level) }}
-        </a-tag>
+        </span>
         <span class="log-message">{{ log.message }}</span>
       </div>
     </div>
@@ -58,6 +61,11 @@
 <script>
 import request from '@/utils/request'
 import { formatStrategyLogTime } from '@/utils/userTime'
+import {
+  normalizeStrategyLogLevel,
+  STRATEGY_LOG_FILTERS,
+  strategyLogLevelKey
+} from '@/utils/strategyLogs'
 
 export default {
   name: 'StrategyLogs',
@@ -76,13 +84,10 @@ export default {
   },
   computed: {
     filterOptions () {
-      return [
-        { value: 'all', label: this.$t('trading-assistant.logs.level.all') || 'All', icon: 'bars' },
-        { value: 'trade', label: this.$t('trading-assistant.logs.level.trade'), icon: 'transaction' },
-        { value: 'signal', label: this.$t('trading-assistant.logs.level.signal'), icon: 'notification' },
-        { value: 'warning', label: this.$t('trading-assistant.logs.level.warn'), icon: 'exclamation-circle' },
-        { value: 'error', label: this.$t('trading-assistant.logs.level.error'), icon: 'warning' }
-      ]
+      return STRATEGY_LOG_FILTERS.map(item => ({
+        ...item,
+        label: this.$t(strategyLogLevelKey(item.value))
+      }))
     },
     filteredLogs () {
       if (this.filterLevel === 'all') return this.logs
@@ -161,21 +166,15 @@ export default {
       })
     },
 
-    getLevelColor (level) {
-      const map = { info: 'blue', warning: 'orange', error: 'red', trade: 'green', signal: 'purple' }
-      return map[this.normalizeLogLevel(level)] || 'default'
-    },
-
     getLevelText (level) {
       const normalized = this.normalizeLogLevel(level)
-      const key = `trading-assistant.logs.level.${normalized === 'warning' ? 'warn' : normalized}`
+      const key = strategyLogLevelKey(normalized)
       const translated = this.$t(key)
       return translated !== key ? translated : normalized
     },
 
     normalizeLogLevel (level) {
-      const normalized = String(level || 'info').trim().toLowerCase()
-      return normalized === 'warn' ? 'warning' : normalized
+      return normalizeStrategyLogLevel(level)
     }
   }
 }
@@ -194,6 +193,12 @@ export default {
   justify-content: space-between;
   padding: 8px 0;
   margin-bottom: 8px;
+  gap: 12px;
+
+  .toolbar-left {
+    flex: 1;
+    min-width: 0;
+  }
 
   .toolbar-right {
     display: flex;
@@ -209,7 +214,9 @@ export default {
 
 .log-filter-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  overflow: visible;
 }
 
 .log-filter-tab {
@@ -228,7 +235,13 @@ export default {
 
   .tab-icon {
     font-size: 13px;
+    color: inherit;
     transition: transform 0.2s;
+  }
+
+  .tab-label {
+    color: inherit;
+    white-space: nowrap;
   }
 
   .tab-count {
@@ -388,8 +401,49 @@ export default {
 }
 
 .log-level {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  min-width: 42px;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.log-level-info {
+  color: #096dd9;
+  background: #e6f7ff;
+  border-color: #91d5ff;
+}
+
+.log-level-trade {
+  color: #237804;
+  background: #f6ffed;
+  border-color: #b7eb8f;
+}
+
+.log-level-signal {
+  color: #531dab;
+  background: #f9f0ff;
+  border-color: #d3adf7;
+}
+
+.log-level-warning {
+  color: #874d00;
+  background: #fffbe6;
+  border-color: #ffd666;
+}
+
+.log-level-error {
+  color: #a8071a;
+  background: #fff1f0;
+  border-color: #ffa39e;
 }
 
 .log-message {
@@ -513,6 +567,36 @@ export default {
 
   .log-time {
     color: rgba(255, 255, 255, 0.3);
+  }
+
+  .log-level-info {
+    color: #69c0ff;
+    background: rgba(24, 144, 255, 0.16);
+    border-color: rgba(105, 192, 255, 0.45);
+  }
+
+  .log-level-trade {
+    color: #95de64;
+    background: rgba(82, 196, 26, 0.14);
+    border-color: rgba(149, 222, 100, 0.42);
+  }
+
+  .log-level-signal {
+    color: #d3adf7;
+    background: rgba(114, 46, 209, 0.18);
+    border-color: rgba(211, 173, 247, 0.42);
+  }
+
+  .log-level-warning {
+    color: #ffd666;
+    background: rgba(250, 173, 20, 0.16);
+    border-color: rgba(255, 214, 102, 0.5);
+  }
+
+  .log-level-error {
+    color: #ff9c9c;
+    background: rgba(255, 77, 79, 0.16);
+    border-color: rgba(255, 156, 156, 0.46);
   }
 
   .log-message {
