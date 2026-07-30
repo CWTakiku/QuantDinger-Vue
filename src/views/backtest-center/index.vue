@@ -166,16 +166,27 @@
         </div>
         <div class="run-action-bar">
           <a-button
+            v-if="!running"
             type="primary"
             block
             size="large"
             icon="thunderbolt"
             data-testid="run-backtest"
             :disabled="runDisabled"
-            :loading="running"
             @click="runActive"
           >
             {{ mode === 'portfolio' ? $t('backtest-center.runBacktest') : $t('strategyV2.factorResearch.run') }}
+          </a-button>
+          <a-button
+            v-else
+            type="danger"
+            block
+            size="large"
+            icon="stop"
+            data-testid="stop-backtest"
+            @click="stopActive"
+          >
+            {{ $t('backtest-center.stopBacktest') }}
           </a-button>
         </div>
       </section>
@@ -194,6 +205,9 @@
           <h3>{{ mode === 'factor' ? $t('strategyV2.factorResearch.runningTitle') : $t('strategyV2.backtest.runningTitle') }}</h3>
           <p>{{ mode === 'factor' ? $t('strategyV2.factorResearch.runningDesc') : $t('strategyV2.backtest.runningDesc') }}</p>
           <strong>{{ $t('strategyV2.backtest.elapsed', { seconds: runElapsedSeconds }) }}</strong>
+          <a-button class="running-stop-btn" type="danger" ghost icon="stop" data-testid="stop-backtest-panel" @click="stopActive">
+            {{ $t('backtest-center.stopBacktest') }}
+          </a-button>
           <div class="running-contract">
             <span><a-icon type="check-circle" />{{ $t('strategyV2.backtest.sourceCheck') }}</span>
             <span><a-icon type="database" />{{ mode === 'factor' ? $t('strategyV2.factorResearch.pointInTimeExecution') : $t('strategyV2.backtest.serverExecution') }}</span>
@@ -327,6 +341,13 @@ import {
   runStrategyFactorResearch,
   runStrategyBacktest
 } from '@/api/strategy'
+import {
+  clearBacktestRunSession,
+  getBacktestRunSession,
+  isBacktestRunCancelled,
+  startBacktestRunSession,
+  stopBacktestRunSession
+} from '@/services/backtestRunSession'
 import PortfolioResult from './PortfolioResult.vue'
 import FactorResearchResult from './FactorResearchResult.vue'
 
@@ -587,6 +608,11 @@ export default {
       await this.selectSource(sourceId)
     }
     window.addEventListener('resize', this.resizeEquityChart)
+    await this.attachBacktestSession()
+  },
+  activated () {
+    this.attachBacktestSession()
+    this.$nextTick(() => this.resizeEquityChart())
   },
   beforeDestroy () {
     window.removeEventListener('resize', this.resizeEquityChart)
@@ -788,17 +814,72 @@ export default {
       this.$message.error(this.backtestRangeAlertDescription)
       return false
     },
-    startRunTimer () {
+    startRunTimer (startedAt = Date.now()) {
       this.stopRunTimer()
-      this.runElapsedSeconds = 0
-      const startedAt = Date.now()
+      const origin = Number(startedAt) > 0 ? Number(startedAt) : Date.now()
+      this.runElapsedSeconds = Math.max(0, Math.floor((Date.now() - origin) / 1000))
       this.runTimer = window.setInterval(() => {
-        this.runElapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+        this.runElapsedSeconds = Math.max(0, Math.floor((Date.now() - origin) / 1000))
       }, 1000)
     },
     stopRunTimer () {
       if (this.runTimer) window.clearInterval(this.runTimer)
       this.runTimer = null
+    },
+    applyRunResult (mode, data) {
+      if (mode === 'factor') {
+        this.mode = 'factor'
+        this.factorResult = data || null
+        this.selectedRun = { id: data && data.runId }
+        return
+      }
+      this.mode = 'portfolio'
+      this.result = data || null
+      this.selectedRun = { id: data && data.runId }
+      const billing = data && data.billing
+      if (billing && typeof billing.remaining !== 'undefined') {
+        this.$root.$emit('credits-updated', billing.remaining)
+      }
+    },
+    async attachBacktestSession () {
+      const session = getBacktestRunSession()
+      if (!session || (!session.running && !session.result && !session.error)) return
+      if (session.mode) this.mode = session.mode
+      if (session.running && session.promise) {
+        this.running = true
+        this.startRunTimer(session.startedAt)
+        try {
+          const data = await session.promise
+          if (getBacktestRunSession().id !== session.id) return
+          this.applyRunResult(session.mode, data)
+          await this.loadHistory()
+        } catch (error) {
+          if (getBacktestRunSession().id !== session.id) return
+          if (isBacktestRunCancelled(error)) {
+            this.$message.info(this.$t('backtest-center.stopped'))
+            return
+          }
+          this.$message.error(
+            (error && error.backendMessage) ||
+            (session.mode === 'factor'
+              ? this.$t('strategyV2.factorResearch.runFailed')
+              : this.$t('strategyV2.backtest.runFailed'))
+          )
+        } finally {
+          if (getBacktestRunSession().id === session.id) {
+            this.stopRunTimer()
+            this.running = false
+            clearBacktestRunSession(session.id)
+          }
+        }
+        return
+      }
+      if (session.result) {
+        this.applyRunResult(session.mode, session.result)
+        clearBacktestRunSession(session.id)
+      } else if (session.error) {
+        clearBacktestRunSession(session.id)
+      }
     },
     async run () {
       if (!this.form.sourceId) {
@@ -806,34 +887,50 @@ export default {
         return
       }
       if (!this.ensureBacktestRangeAllowed()) return
+      if (getBacktestRunSession().running) {
+        this.$message.warning(this.$t('strategyV2.backtest.runningTitle'))
+        return
+      }
+      const payload = {
+        sourceId: this.form.sourceId,
+        startDate: this.form.startDate.format('YYYY-MM-DD'),
+        endDate: this.form.endDate.format('YYYY-MM-DD'),
+        initialCapital: this.form.initialCapital,
+        commission: this.form.commission,
+        slippage: this.form.slippage,
+        leverageEnabled: this.form.leverageEnabled,
+        leverage: this.form.leverageEnabled ? this.form.leverage : 1,
+        params: this.params
+      }
+      const session = startBacktestRunSession({
+        mode: 'portfolio',
+        runner: async (signal) => {
+          const response = await runStrategyBacktest(payload, { signal })
+          return response.data
+        }
+      })
       this.running = true
       this.result = null
       this.selectedRun = null
-      this.startRunTimer()
+      this.startRunTimer(session.startedAt)
       try {
-        const response = await runStrategyBacktest({
-          sourceId: this.form.sourceId,
-          startDate: this.form.startDate.format('YYYY-MM-DD'),
-          endDate: this.form.endDate.format('YYYY-MM-DD'),
-          initialCapital: this.form.initialCapital,
-          commission: this.form.commission,
-          slippage: this.form.slippage,
-          leverageEnabled: this.form.leverageEnabled,
-          leverage: this.form.leverageEnabled ? this.form.leverage : 1,
-          params: this.params
-        })
-        this.result = response.data
-        this.selectedRun = { id: response.data && response.data.runId }
-        const billing = response.data && response.data.billing
-        if (billing && typeof billing.remaining !== 'undefined') {
-          this.$root.$emit('credits-updated', billing.remaining)
-        }
+        const data = await session.promise
+        if (getBacktestRunSession().id !== session.id) return
+        this.applyRunResult('portfolio', data)
         await this.loadHistory()
       } catch (error) {
+        if (getBacktestRunSession().id !== session.id) return
+        if (isBacktestRunCancelled(error)) {
+          this.$message.info(this.$t('backtest-center.stopped'))
+          return
+        }
         this.$message.error((error && error.backendMessage) || this.$t('strategyV2.backtest.runFailed'))
       } finally {
-        this.stopRunTimer()
-        this.running = false
+        if (getBacktestRunSession().id === session.id) {
+          this.stopRunTimer()
+          this.running = false
+          clearBacktestRunSession(session.id)
+        }
       }
     },
     async runFactorResearch () {
@@ -842,33 +939,57 @@ export default {
         return
       }
       if (!this.ensureBacktestRangeAllowed()) return
+      if (getBacktestRunSession().running) {
+        this.$message.warning(this.$t('strategyV2.factorResearch.runningTitle'))
+        return
+      }
+      const payload = {
+        sourceId: this.form.sourceId,
+        startDate: this.form.startDate.format('YYYY-MM-DD'),
+        endDate: this.form.endDate.format('YYYY-MM-DD'),
+        commission: this.form.commission,
+        slippage: this.form.slippage,
+        factorId: this.factorForm.factorId,
+        groups: this.factorForm.groups,
+        holdingPeriod: this.factorForm.holdingPeriod,
+        neutralizeIndustry: this.factorForm.neutralizeIndustry
+      }
+      const session = startBacktestRunSession({
+        mode: 'factor',
+        runner: async (signal) => {
+          const response = await runStrategyFactorResearch(payload, { signal })
+          return response.data
+        }
+      })
       this.running = true
       this.factorResult = null
-      this.startRunTimer()
+      this.startRunTimer(session.startedAt)
       try {
-        const response = await runStrategyFactorResearch({
-          sourceId: this.form.sourceId,
-          startDate: this.form.startDate.format('YYYY-MM-DD'),
-          endDate: this.form.endDate.format('YYYY-MM-DD'),
-          commission: this.form.commission,
-          slippage: this.form.slippage,
-          factorId: this.factorForm.factorId,
-          groups: this.factorForm.groups,
-          holdingPeriod: this.factorForm.holdingPeriod,
-          neutralizeIndustry: this.factorForm.neutralizeIndustry
-        })
-        this.factorResult = response.data
-        this.selectedRun = { id: response.data && response.data.runId }
+        const data = await session.promise
+        if (getBacktestRunSession().id !== session.id) return
+        this.applyRunResult('factor', data)
         await this.loadHistory()
       } catch (error) {
+        if (getBacktestRunSession().id !== session.id) return
+        if (isBacktestRunCancelled(error)) {
+          this.$message.info(this.$t('backtest-center.stopped'))
+          return
+        }
         this.$message.error((error && error.backendMessage) || this.$t('strategyV2.factorResearch.runFailed'))
       } finally {
-        this.stopRunTimer()
-        this.running = false
+        if (getBacktestRunSession().id === session.id) {
+          this.stopRunTimer()
+          this.running = false
+          clearBacktestRunSession(session.id)
+        }
       }
     },
     runActive () {
       return this.mode === 'portfolio' ? this.run() : this.runFactorResearch()
+    },
+    stopActive () {
+      if (!this.running) return
+      stopBacktestRunSession()
     },
     async openRun (item) {
       if (this.historyDetailLoading) return
@@ -1094,6 +1215,7 @@ export default {
 .result-running h3 { margin: 4px 0 0; color: #17233d; font-size: 18px; }
 .result-running p { max-width: 620px; margin: 0; line-height: 1.6; }
 .result-running > strong { color: #3f7f1f; font-variant-numeric: tabular-nums; }
+.running-stop-btn { margin-top: 4px; }
 .running-icon { display: inline-flex; width: 64px; height: 64px; align-items: center; justify-content: center; border: 1px solid #d9f7be; border-radius: 22px; color: #52c41a; background: #f6ffed; font-size: 27px; }
 .running-contract { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 7px; }
 .running-contract span { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid #e4e9ef; border-radius: 999px; color: #64748b; font-size: 11px; }

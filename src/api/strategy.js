@@ -271,7 +271,7 @@ export function getStrategyAssetList (params = {}) {
   })
 }
 
-export function runStrategyBacktest (data) {
+export function runStrategyBacktest (data, options = {}) {
   const payload = { ...(data || {}) }
   const timeout = Number(payload.timeout) > 0 ? Number(payload.timeout) : BACKTEST_TIMEOUT
   delete payload.timeout
@@ -279,11 +279,12 @@ export function runStrategyBacktest (data) {
     url: api.strategyBacktestRun,
     method: 'post',
     data: payload,
-    timeout
+    timeout,
+    signal: options && options.signal
   })
 }
 
-export function runStrategyFactorResearch (data) {
+export function runStrategyFactorResearch (data, options = {}) {
   const payload = { ...(data || {}) }
   const timeout = Number(payload.timeout) > 0 ? Number(payload.timeout) : BACKTEST_TIMEOUT
   delete payload.timeout
@@ -291,7 +292,8 @@ export function runStrategyFactorResearch (data) {
     url: api.strategyFactorResearch,
     method: 'post',
     data: payload,
-    timeout
+    timeout,
+    signal: options && options.signal
   })
 }
 
