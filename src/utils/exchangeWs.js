@@ -1,7 +1,7 @@
 /**
  * Exchange WebSocket K-line stream client.
  *
- * Supports multiple exchanges: Binance, OKX, Bitget, Bybit, Gate, Coinbase.
+ * Supports multiple exchanges: Binance, OKX, Bitget, Bybit, and Gate.
  * Falls back to Binance if the configured exchange fails to connect.
  */
 

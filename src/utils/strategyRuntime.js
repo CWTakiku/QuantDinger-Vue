@@ -43,7 +43,10 @@ export const strategyExecutionMode = strategy => {
 
 export const strategySymbol = strategy => {
   const config = strategyTradingConfig(strategy)
-  const direct = String(config.symbol || (strategy && strategy.symbol) || '').trim()
+  // The strategy row is the deployment authority. Older sources may retain an
+  // IDE last-run default in trading_config.symbol (for example BTC/USDT on a
+  // USStock:SPY source), so the nested runtime hint must only be a fallback.
+  const direct = String((strategy && strategy.symbol) || config.symbol || '').trim()
   if (direct) return direct
   return ''
 }

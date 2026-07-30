@@ -841,8 +841,7 @@ export default {
           factorId: this.factorForm.factorId,
           groups: this.factorForm.groups,
           holdingPeriod: this.factorForm.holdingPeriod,
-          neutralizeIndustry: this.factorForm.neutralizeIndustry,
-          timeout: 180000
+          neutralizeIndustry: this.factorForm.neutralizeIndustry
         })
         this.factorResult = response.data
         this.selectedRun = { id: response.data && response.data.runId }

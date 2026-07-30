@@ -139,7 +139,7 @@
           <div class="section-title">{{ t('executorStrategies.section.capitalRisk') }}</div>
           <div class="field-grid">
             <div class="field-block">
-              <label>{{ t(supportsTrailingTakeProfit ? 'executorStrategies.fixedTakeProfitPct' : 'executorStrategies.takeProfitPct') }}</label>
+              <label>{{ t(form.executor_type === 'grid' ? 'executorStrategies.gridPortfolioTakeProfitPct' : (supportsTrailingTakeProfit ? 'executorStrategies.fixedTakeProfitPct' : 'executorStrategies.takeProfitPct')) }}</label>
               <a-input-number
                 v-model="takeProfitPctDisplay"
                 :min="0"
@@ -152,9 +152,12 @@
               <small v-if="supportsTrailingTakeProfit" class="field-hint">
                 {{ t(form.trailing_take_profit_enabled ? 'executorStrategies.fixedTakeProfitDisabledHint' : 'executorStrategies.fixedTakeProfitHint') }}
               </small>
+              <small v-else-if="form.executor_type === 'grid'" class="field-hint">
+                {{ t('executorStrategies.gridPortfolioTakeProfitHint') }}
+              </small>
             </div>
             <div class="field-block">
-              <label>{{ t('executorStrategies.hardStopPct') }}</label>
+              <label>{{ t(form.executor_type === 'grid' ? 'executorStrategies.gridPortfolioStopLossPct' : 'executorStrategies.hardStopPct') }}</label>
               <a-input-number
                 v-model="hardStopPctDisplay"
                 :min="0"
@@ -200,6 +203,22 @@
                 <small class="field-hint">{{ t('executorStrategies.trailingCallbackHint') }}</small>
               </div>
             </div>
+          </div>
+
+          <a-alert
+            v-if="isMartingale"
+            class="martingale-budget-notice"
+            type="info"
+            show-icon
+            :message="t('executorStrategies.martingaleFullBudgetTitle')"
+            :description="t('executorStrategies.martingaleFullBudgetDesc')" />
+
+          <div v-if="isMartingale" class="restart-after-stop-card">
+            <div>
+              <strong>{{ t('executorStrategies.restartAfterStop') }}</strong>
+              <small>{{ t('executorStrategies.restartAfterStopHint') }}</small>
+            </div>
+            <a-switch v-model="form.restart_after_stop" />
           </div>
 
           <div class="section-title">{{ t('executorStrategies.section.executor') }}</div>
@@ -248,7 +267,12 @@
             <div class="field-grid">
               <div class="field-block">
                 <label>{{ t('executorStrategies.gridCount') }}</label>
-                <a-input-number v-model="form.grid_count" :min="2" :max="200" style="width: 100%" />
+                <a-input-number
+                  v-model="form.grid_count"
+                  :min="2"
+                  :max="200"
+                  :step="form.side === 'neutral' ? 2 : 1"
+                  style="width: 100%" />
               </div>
               <div class="field-block">
                 <label>
@@ -596,14 +620,24 @@
           :message="previewWarnings.join(' / ')"
         />
 
+        <a-alert
+          v-for="(message, index) in riskDiagnosticMessages"
+          :key="`risk-${index}`"
+          class="risk-diagnostic"
+          type="warning"
+          show-icon
+          :message="t('executorStrategies.riskDiagnosticTitle')"
+          :description="message"
+        />
+
         <a-table
           class="executor-level-table"
           size="small"
           :columns="columns"
           :data-source="levels"
-          :pagination="{ pageSize: 12, size: 'small' }"
+          :pagination="false"
           row-key="level"
-          :scroll="{ x: 860 }"
+          :scroll="{ x: 860, y: 430 }"
         >
           <template slot="level" slot-scope="text">
             <span class="mono">#{{ text }}</span>
@@ -698,6 +732,9 @@ export default {
     supportsTrailingTakeProfit () {
       return ['dca', 'martingale', 'layered_martingale'].includes(this.form.executor_type)
     },
+    isMartingale () {
+      return ['martingale', 'layered_martingale'].includes(this.form.executor_type)
+    },
     summary () {
       return (this.preview && this.preview.summary) || {}
     },
@@ -706,6 +743,16 @@ export default {
     },
     previewWarnings () {
       return ((this.preview && this.preview.warnings) || []).map(item => this.warningText(item))
+    },
+    riskDiagnosticMessages () {
+      return ((this.preview && this.preview.risk_diagnostics) || [])
+        .filter(item => item && item.code === 'hard_stop_blocks_level')
+        .map(item => this.t('executorStrategies.riskDiagnosticHardStop', {
+          level: Number(item.before_level || 0),
+          configured: this.fmtPct(item.configured_stop_pct),
+          required: this.fmtPct(item.required_stop_pct),
+          suggested: this.fmtPct(item.suggested_stop_pct)
+        }))
     },
     dcaOrderPct () {
       const orders = Math.max(1, Number(this.form.dca_max_orders || 1))
@@ -730,6 +777,20 @@ export default {
           { key: 'budget', label: this.t('executorStrategies.summary.budget'), value: this.fmtPct(config.dca_total_budget_pct) },
           { key: 'interval', label: this.t('executorStrategies.summary.interval'), value: this.dcaIntervalText(config.dca_interval_minutes) },
           { key: 'perOrder', label: this.t('executorStrategies.summary.perOrder'), value: this.fmtPct(config.dca_order_pct) }
+        ]
+      }
+      if (this.form.executor_type === 'grid' && this.form.side === 'neutral') {
+        const total = Number(this.summary.total_amount_quote || 0)
+        const longAmount = Number(this.summary.long_amount_quote || 0)
+        const shortAmount = Number(this.summary.short_amount_quote || 0)
+        const split = total > 0
+          ? `${((longAmount / total) * 100).toFixed(0)}% / ${((shortAmount / total) * 100).toFixed(0)}%`
+          : '0% / 0%'
+        return [
+          { key: 'levels', label: this.t('executorStrategies.summary.gridCells'), value: Number(this.summary.level_count || 0) },
+          { key: 'legs', label: this.t('executorStrategies.summary.longShortCells'), value: `${Number(this.summary.long_level_count || 0)} / ${Number(this.summary.short_level_count || 0)}` },
+          { key: 'split', label: this.t('executorStrategies.summary.longShortBudget'), value: split },
+          { key: 'range', label: this.t('executorStrategies.summary.priceRange'), value: `${this.fmtPrice(this.summary.first_price)} — ${this.fmtPrice(this.summary.last_price)}` }
         ]
       }
       return [
@@ -935,11 +996,13 @@ export default {
         inter_spacing_4_pct: 0.022,
         step_multiplier: 1.2,
         volume_multiplier: 1.15,
-        take_profit_pct: 0.004,
+        take_profit_pct: 0,
         trailing_take_profit_enabled: true,
         trailing_activation_pct: 0.006,
         trailing_callback_pct: 0.002,
         hard_stop_pct: 0.12,
+        restart_after_stop: false,
+        final_level_uses_remaining_budget: true,
         max_entry_drift_pct: 0.03
       }
     },
@@ -1028,6 +1091,8 @@ export default {
     handleSideChange () {
       if (this.form.side === 'neutral') {
         this.form.initial_position_pct = 0
+        const count = Math.max(2, Number(this.form.grid_count || 2))
+        if (count % 2) this.form.grid_count = count + 1
       } else if (this.form.executor_type === 'grid' && Number(this.form.initial_position_pct || 0) === 0) {
         this.form.initial_position_pct = 0.6
       }
@@ -1459,6 +1524,34 @@ export default {
   margin-top: 10px;
 }
 
+.martingale-budget-notice {
+  margin: 4px 0 10px;
+}
+
+.restart-after-stop-card {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 10px;
+  padding: 10px;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  background: #fffbe6;
+}
+
+.restart-after-stop-card strong,
+.restart-after-stop-card small {
+  display: block;
+}
+
+.restart-after-stop-card small {
+  margin-top: 2px;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .dca-market-notice,
 .layered-explainer,
 .dca-explainer {
@@ -1665,6 +1758,10 @@ export default {
   margin-bottom: 14px;
 }
 
+.risk-diagnostic {
+  margin-bottom: 14px;
+}
+
 .executor-level-table {
   margin-top: 4px;
 }
@@ -1725,8 +1822,14 @@ export default {
   background: #15230f;
 }
 
+.theme-dark .restart-after-stop-card {
+  border-color: #614700;
+  background: #2b2111;
+}
+
 .theme-dark .field-hint,
-.theme-dark .trailing-profit-card__header small {
+.theme-dark .trailing-profit-card__header small,
+.theme-dark .restart-after-stop-card small {
   color: #9aa4b2;
 }
 

@@ -13,6 +13,11 @@ const LOCALE_KEY = 'lang'
 // Prevent multiple concurrent 401 redirects
 let isRedirectingToLogin = false
 
+function isLoginRequest (config) {
+  const url = String(config && config.url ? config.url : '').split('?')[0]
+  return url === '/api/auth/login' || url === '/api/auth/login-code'
+}
+
 function getToken () {
   let token = storage.get(ACCESS_TOKEN)
   if (!token) {
@@ -178,7 +183,11 @@ const errorHandler = (error) => {
           tt('request.forbiddenDesc', 'You do not have permission to perform this action.')
       })
     }
-    if (error.response.status === 401 && !(data.result && data.result.isLogin)) {
+    if (
+      error.response.status === 401 &&
+      !isLoginRequest(error.config) &&
+      !(data.result && data.result.isLogin)
+    ) {
       // Token invalid/expired: MUST clear local auth state, otherwise route guard will
       // detect a stale token and immediately bounce user away from login page.
       if (!isRedirectingToLogin) {
@@ -282,6 +291,13 @@ request.interceptors.request.use(config => {
 
 // response interceptor
 request.interceptors.response.use((response) => {
+  // A previous expired session may have redirected to the hash-based login route
+  // without reloading the JavaScript bundle. Reset the redirect guard as soon as
+  // a new login succeeds so future token invalidations are handled normally.
+  if (isLoginRequest(response.config)) {
+    isRedirectingToLogin = false
+  }
+
   try {
     if (typeof document !== 'undefined') {
       const cookies = document.cookie

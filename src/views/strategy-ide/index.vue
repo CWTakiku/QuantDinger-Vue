@@ -1061,7 +1061,6 @@ export default {
         trade_direction: generated.trade_direction || this.runConfig.trade_direction
       }
       this.scriptCode = generatedCode
-      this.editorKeySeed += 1
       await this.$nextTick()
       const editor = this.$refs.scriptEditor
       if (editor && typeof editor.setCode === 'function') {
@@ -1323,7 +1322,6 @@ export default {
         if (!options.silent) this.$message.info(this.text.hiddenScriptDesc)
         return null
       }
-      this.scriptCode = this.getCurrentScriptCode()
       if (!this.validateScriptCode()) return null
       if (!forceCreate && this.currentSource && this.currentSource.status === 'running') {
         this.$message.warning(this.text.runningEditBlocked)
@@ -1347,7 +1345,7 @@ export default {
           const saved = (res && res.data) || {}
           const savedId = this.getScriptSourceId(saved) || this.currentSourceId
           await this.loadSources()
-          await this.openSource(savedId, { updateRoute: true })
+          await this.openSource(savedId, { updateRoute: options.updateRoute !== false })
           if (!options.silent) this.$message.success(this.text.saveSuccess)
           return this.currentSourceId
         }
@@ -1504,7 +1502,12 @@ export default {
       const go = async () => {
         const sourceId = this.scriptCodeHidden && this.currentSourceId
           ? await this.saveHiddenScriptParams({ silent: true, loadingMode: 'backtest' })
-          : await this.saveScript(false, { skipUnchanged: true, silent: true, loadingMode: 'backtest' })
+          : await this.saveScript(false, {
+            skipUnchanged: true,
+            silent: true,
+            loadingMode: 'backtest',
+            updateRoute: false
+          })
         if (!sourceId) return
         this.$router.push({
           path: '/backtest-center',
@@ -1519,7 +1522,12 @@ export default {
     async createLiveFromScript () {
       const sourceId = this.scriptCodeHidden && this.currentSourceId
         ? await this.saveHiddenScriptParams({ silent: true, loadingMode: 'live' })
-        : await this.saveScript(false, { skipUnchanged: true, silent: true, loadingMode: 'live' })
+        : await this.saveScript(false, {
+          skipUnchanged: true,
+          silent: true,
+          loadingMode: 'live',
+          updateRoute: false
+        })
       if (!sourceId) return
       if (this.currentAssetType === 'portfolio_strategy') {
         this.$router.push({

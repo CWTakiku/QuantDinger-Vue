@@ -120,7 +120,7 @@
               </a-form-item>
 
               <a-form-item>
-                <a-row :gutter="12">
+                <a-row class="auth-code-row" :gutter="12">
                   <a-col :span="16">
                     <a-input
                       size="large"
@@ -231,7 +231,7 @@
 
               <!-- Verification Code -->
               <a-form-item>
-                <a-row :gutter="12">
+                <a-row class="auth-code-row" :gutter="12">
                   <a-col :span="16">
                     <a-input
                       size="large"
@@ -458,7 +458,7 @@
         </a-form-item>
 
         <a-form-item>
-          <a-row :gutter="12">
+          <a-row class="auth-code-row" :gutter="12">
             <a-col :span="16">
               <a-input
                 size="large"
@@ -1602,6 +1602,17 @@ export default {
   }
 
   .auth-form {
+    width: 100%;
+
+    ::v-deep .ant-form-item-control-wrapper,
+    ::v-deep .ant-form-item-control,
+    ::v-deep .ant-input,
+    ::v-deep .ant-input-affix-wrapper,
+    ::v-deep .ant-input-password,
+    ::v-deep .ant-btn-block {
+      width: 100%;
+    }
+
     .submit-button {
       padding: 0 15px;
       font-size: 16px;

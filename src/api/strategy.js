@@ -1,4 +1,4 @@
-import request, { AI_GENERATE_TIMEOUT } from '@/utils/request'
+import request, { AI_GENERATE_TIMEOUT, BACKTEST_TIMEOUT } from '@/utils/request'
 
 const api = {
   // Local Python backend
@@ -271,7 +271,7 @@ export function getStrategyAssetList (params = {}) {
 
 export function runStrategyBacktest (data) {
   const payload = { ...(data || {}) }
-  const timeout = payload.timeout
+  const timeout = Number(payload.timeout) > 0 ? Number(payload.timeout) : BACKTEST_TIMEOUT
   delete payload.timeout
   return request({
     url: api.strategyBacktestRun,
@@ -282,11 +282,14 @@ export function runStrategyBacktest (data) {
 }
 
 export function runStrategyFactorResearch (data) {
+  const payload = { ...(data || {}) }
+  const timeout = Number(payload.timeout) > 0 ? Number(payload.timeout) : BACKTEST_TIMEOUT
+  delete payload.timeout
   return request({
     url: api.strategyFactorResearch,
     method: 'post',
-    data,
-    timeout: data && data.timeout
+    data: payload,
+    timeout
   })
 }
 
@@ -308,7 +311,7 @@ export function getStrategyFactorResearchRun (runId) {
 
 export function tuneStrategyBacktest (data) {
   const payload = { ...(data || {}) }
-  const timeout = payload.timeout
+  const timeout = Number(payload.timeout) > 0 ? Number(payload.timeout) : BACKTEST_TIMEOUT
   delete payload.timeout
   return request({
     url: api.strategyBacktestTune,

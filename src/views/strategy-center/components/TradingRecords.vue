@@ -6,14 +6,14 @@
         <strong :class="item.tone">{{ item.value }}</strong>
       </div>
     </div>
-    <div v-if="records.length === 0 && !loading" class="empty-state strategy-tab-empty">
+    <div v-if="records.length === 0 && !isRecordsLoading" class="empty-state strategy-tab-empty">
       <a-empty :image="false" :description="$t('trading-assistant.table.noTrades')" />
     </div>
     <a-table
       v-else
       :columns="columns"
       :data-source="records"
-      :loading="loading"
+      :loading="isRecordsLoading"
       :pagination="{ pageSize: 10 }"
       size="small"
       rowKey="id"
@@ -92,6 +92,9 @@ export default {
     }
   },
   computed: {
+    isRecordsLoading () {
+      return this.loading || this.recordsLoading
+    },
     isGridBot () {
       const bt = String(this.botType || '').toLowerCase()
       return bt === 'grid' || bt === 'dca'
@@ -200,7 +203,9 @@ export default {
   data () {
     return {
       records: [],
-      costSummary: null
+      costSummary: null,
+      recordsLoading: false,
+      recordsRequestId: 0
     }
   },
   watch: {
@@ -226,8 +231,11 @@ export default {
     async loadRecords () {
       if (!this.strategyId) return
 
+      const requestId = ++this.recordsRequestId
+      this.recordsLoading = true
       try {
         const res = await getStrategyTrades(this.strategyId, this.$i18n && this.$i18n.locale)
+        if (requestId !== this.recordsRequestId) return
         if (res.code === 1) {
           const list = res.data.trades || res.data.items || []
           this.costSummary = res.data.cost_summary || null
@@ -263,6 +271,8 @@ export default {
           this.$message.error(res.msg || this.$t('trading-assistant.messages.loadTradesFailed'))
         }
       } catch (error) {
+      } finally {
+        if (requestId === this.recordsRequestId) this.recordsLoading = false
       }
     },
     formatTime (time) {
