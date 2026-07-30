@@ -1,0 +1,73 @@
+/* A-share locale: RMB-friendly labels + 红涨绿跌 + hide sidebar logo */
+
+.profit,
+.pnl-positive,
+.cost-positive,
+.ta-pnl-pos,
+.positive,
+.tone-success .metric-value {
+  color: #f5222d !important;
+}
+
+.loss,
+.pnl-negative,
+.cost-negative,
+.ta-pnl-neg,
+.negative,
+.tone-danger .metric-value {
+  color: #52c41a !important;
+}
+
+.metric-card.positive .metric-value,
+.metric-card.positive strong,
+strong.positive,
+.trade-profit.positive {
+  color: #f5222d !important;
+}
+
+.metric-card.negative .metric-value,
+.metric-card.negative strong,
+strong.negative,
+.trade-profit.negative {
+  color: #52c41a !important;
+}
+
+.overview-holdings {
+  margin-top: 14px;
+}
+
+.overview-holdings .chart-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.overview-holdings .chart-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.overview-holdings .chart-heading span {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+/* Hide top-left brand logo */
+.basic-layout-wrapper .ant-pro-global-header-logo,
+.basic-layout-wrapper .ant-pro-sider-menu-logo,
+.basic-layout-wrapper .sidebar-logo-wrapper,
+.ant-pro-global-header-logo,
+.ant-pro-sider-menu-logo,
+.sidebar-logo-wrapper,
+.sidebar-logo,
+img.sidebar-logo {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}

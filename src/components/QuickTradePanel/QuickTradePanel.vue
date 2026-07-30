@@ -508,6 +508,7 @@ export default {
       return String(this.market || '').trim() || 'Crypto'
     },
     isStockMarket () {
+      // Quick-trade broker path is US (Alpaca) only; CN/HK use price feed but not this panel's order path.
       return ['USStock', 'Stock', 'Stocks'].includes(this.normalizedMarket)
     },
     isCryptoMarket () {
@@ -517,7 +518,13 @@ export default {
       return this.isCryptoMarket || this.isStockMarket
     },
     priceMarketParam () {
-      return this.isStockMarket ? 'USStock' : 'Crypto'
+      const symbol = String(this.currentSymbol || this.symbol || '').trim()
+      // Infer equity market from ticker shape so A-share codes never hit Crypto price API.
+      if (/^\d{6}$/.test(symbol)) return 'CNStock'
+      if (/\.HK$/i.test(symbol)) return 'HKStock'
+      const m = this.normalizedMarket
+      if (m === 'Stock' || m === 'Stocks') return 'USStock'
+      return m || 'Crypto'
     },
     orderCurrency () {
       return this.isStockMarket ? 'USD' : 'USDT'
@@ -985,29 +992,36 @@ export default {
         this.currentPrice = 0
         return
       }
+      const market = this.priceMarketParam
+      const rawSymbol = String(this.currentSymbol || '').trim()
+      const symbol = market === 'CNStock'
+        ? rawSymbol.replace(/\.(SH|SZ)$/i, '')
+        : rawSymbol
+      // Skip clearly invalid Crypto pairs.
+      if (market === 'Crypto' && !symbol.includes('/')) return
       try {
         const res = await request({
           url: '/api/market/price',
           method: 'get',
           params: {
-            market: this.priceMarketParam,
-            symbol: this.currentSymbol
+            market,
+            symbol
           }
         })
         if (res && res.code === 1 && res.data) {
           this.applyNewPrice(res.data.price || res.data.latest || res.data.last)
           return
         }
-        if (this.isStockMarket) {
-          const quote = await broker.alpaca.quote(this.normalizeBrokerSymbol(this.currentSymbol), { marketType: 'USStock' })
+        if (market === 'USStock') {
+          const quote = await broker.alpaca.quote(this.normalizeBrokerSymbol(symbol), { marketType: 'USStock' })
           const data = this.apiPayload(quote)
           this.applyNewPrice(data.price || data.latest || data.last || data.ask || data.bid)
         }
       } catch (e) {
         console.warn('loadPrice error:', e)
-        if (this.isStockMarket) {
+        if (market === 'USStock') {
           try {
-            const quote = await broker.alpaca.quote(this.normalizeBrokerSymbol(this.currentSymbol), { marketType: 'USStock' })
+            const quote = await broker.alpaca.quote(this.normalizeBrokerSymbol(symbol), { marketType: 'USStock' })
             const data = this.apiPayload(quote)
             this.applyNewPrice(data.price || data.latest || data.last || data.ask || data.bid)
           } catch (stockErr) {

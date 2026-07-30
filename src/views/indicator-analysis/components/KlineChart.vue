@@ -461,11 +461,42 @@ export default {
       const key = String(tf || '1H')
       const interval = getTimeframeMs(key)
       if (!interval) return ts
+      const marketHint = String(props.market || props.symbol || '')
+      const useShanghaiDay = /CNStock|CNY|AShare|ashare/i.test(marketHint)
       if (key === '1D') {
+        if (useShanghaiDay) {
+          const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).formatToParts(new Date(ts))
+          const get = (type) => Number(parts.find(p => p.type === type)?.value)
+          // Shanghai midnight as UTC ms for chart axis consistency with backend calendar days.
+          return Date.UTC(get('year'), get('month') - 1, get('day'))
+        }
         const d = new Date(ts)
         return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
       }
       if (key === '1W') {
+        if (useShanghaiDay) {
+          const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            weekday: 'short'
+          }).formatToParts(new Date(ts))
+          const get = (type) => parts.find(p => p.type === type)?.value
+          const y = Number(get('year'))
+          const m = Number(get('month')) - 1
+          const day = Number(get('day'))
+          const weekday = String(get('weekday') || '')
+          const weekdayMap = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 0 }
+          const utcDay = weekdayMap[weekday] ?? new Date(Date.UTC(y, m, day)).getUTCDay()
+          const daysFromMonday = (utcDay + 6) % 7
+          return Date.UTC(y, m, day) - daysFromMonday * TIMEFRAME_MS['1D']
+        }
         const d = new Date(ts)
         const utcDay = d.getUTCDay()
         const daysFromMonday = (utcDay + 6) % 7
@@ -2000,8 +2031,8 @@ registerOverlay({
 
       const isUp = priceChange >= 0
       const isDark = chartTheme.value === 'dark'
-      const accentColor = isUp ? '#26a69a' : '#ef5350'
-      const accentSoft = isUp ? 'rgba(38, 166, 154, 0.55)' : 'rgba(239, 83, 80, 0.55)'
+      const accentColor = isUp ? '#ef5350' : '#26a69a'
+      const accentSoft = isUp ? 'rgba(239, 83, 80, 0.55)' : 'rgba(38, 166, 154, 0.55)'
       const labelBg = isDark ? 'rgba(22, 26, 35, 0.94)' : 'rgba(255, 255, 255, 0.96)'
       const labelBorder = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)'
       const labelText = isDark ? 'rgba(236, 240, 245, 0.92)' : 'rgba(38, 44, 52, 0.88)'
@@ -3237,6 +3268,10 @@ registerOverlay({
             low: {
               show: true,
               color: theme.axisLabelColor
+            },
+            last: {
+              upColor: isDark ? '#f6465d' : '#f5222d',
+              downColor: isDark ? '#0ecb81' : '#52c41a'
             }
           },
           tooltip: {
@@ -3264,9 +3299,16 @@ registerOverlay({
             }
           },
           bar: {
-            upColor: isDark ? '#0ecb81' : '#13c2c2',
-            downColor: isDark ? '#f6465d' : '#fa541c',
-            noChangeColor: theme.borderColor
+            // A-share convention: red up / green down (body + border + wick)
+            upColor: isDark ? '#f6465d' : '#f5222d',
+            downColor: isDark ? '#0ecb81' : '#52c41a',
+            noChangeColor: theme.borderColor,
+            upBorderColor: isDark ? '#f6465d' : '#f5222d',
+            downBorderColor: isDark ? '#0ecb81' : '#52c41a',
+            noChangeBorderColor: theme.borderColor,
+            upWickColor: isDark ? '#f6465d' : '#f5222d',
+            downWickColor: isDark ? '#0ecb81' : '#52c41a',
+            noChangeWickColor: theme.borderColor
           },
           area: {
             point: { animation: false, animationDuration: 0 }

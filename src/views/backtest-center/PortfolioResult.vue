@@ -66,7 +66,7 @@
       <div><span>{{ $t('strategyV2.backtest.engine') }}</span><strong>{{ $t('strategyV2.backtest.engineV2') }}</strong></div>
       <div><span>{{ $t('strategyV2.backtest.fillRule') }}</span><strong>{{ $t('strategyV2.backtest.fillRuleNextOpen') }}</strong></div>
       <div><span>{{ $t('strategyV2.backtest.dateRange') }}</span><strong>{{ formatDateRange(result.executionAssumptions) }}</strong></div>
-      <div><span>{{ $t('backtest-center.initialCapital') }}</span><strong>{{ formatNumber(result.executionAssumptions.initialCapital) }}</strong></div>
+      <div><span>{{ $t('backtest-center.initialCapital') }}</span><strong>{{ formatMoney(result.executionAssumptions.initialCapital) }}</strong></div>
       <div><span>{{ $t('backtest-center.leverage') }}</span><strong>{{ formatLeverage(result.executionAssumptions) }}</strong></div>
       <div><span>{{ $t('backtest-center.commission') }}</span><strong>{{ formatRate(result.executionAssumptions.commission) }}</strong></div>
       <div><span>{{ $t('backtest-center.slippage') }}</span><strong>{{ formatRate(result.executionAssumptions.slippage) }}</strong></div>
@@ -75,10 +75,18 @@
 
     <a-tabs class="result-tabs" default-active-key="overview">
       <a-tab-pane key="overview" :tab="$t('strategyV2.backtest.tabs.overview')">
-        <div class="overview-grid">
+        <div class="overview-grid overview-grid--ashare">
+          <div class="overview-card">
+            <span>期末权益</span>
+            <strong>{{ formatMoney(finalEquityValue) }}</strong>
+          </div>
+          <div class="overview-card">
+            <span>持仓市值</span>
+            <strong>{{ formatMoney(positionMarketValue) }}</strong>
+          </div>
           <div class="overview-card">
             <span>{{ $t('strategyV2.backtest.latestCash') }}</span>
-            <strong>{{ formatNumber(latestSnapshot.cash) }}</strong>
+            <strong>{{ formatMoney(latestSnapshot.cash) }}</strong>
           </div>
           <div class="overview-card">
             <span>{{ $t('strategyV2.backtest.grossExposure') }}</span>
@@ -98,6 +106,21 @@
             <span>{{ $t(`strategyV2.backtest.orderStatus.${name}`) }}</span>
             <strong>{{ Number((attribution.orderStatus || {})[name] || 0) }}</strong>
           </div>
+        </div>
+        <div class="overview-holdings">
+          <div class="chart-heading">
+            <h3>当前持仓</h3>
+            <span>{{ latestHoldingRows.length ? (`共 ${latestHoldingRows.length} 只`) : '暂无持仓' }}</span>
+          </div>
+          <a-table
+            v-if="latestHoldingRows.length"
+            :columns="latestHoldingColumns"
+            :data-source="latestHoldingRows"
+            :row-key="(row, index) => `${row.symbolRaw || row.symbol}-${index}`"
+            size="small"
+            :pagination="latestHoldingRows.length > 12 ? { pageSize: 12 } : false"
+          />
+          <a-empty v-else :description="$t('strategyV2.backtest.noHoldings')" />
         </div>
       </a-tab-pane>
 
@@ -228,6 +251,7 @@ import {
 } from '@/utils/tradeReview'
 import { timestampMillisecondsUtc } from '@/utils/utcInstant'
 import { formatBacktestTime } from '@/utils/userTime'
+import { formatMoneyCny, formatSymbolDisplay } from '@/utils/symbolDisplay'
 
 export default {
   name: 'PortfolioResult',
@@ -307,9 +331,59 @@ export default {
       const rows = snapshots.length ? snapshots : (this.result.equityCurve || [])
       return rows[rows.length - 1] || {}
     },
+    finalEquityValue () {
+      const fromResult = Number(this.result && this.result.finalEquity)
+      if (Number.isFinite(fromResult) && fromResult > 0) return fromResult
+      const fromSnapshot = Number(this.latestSnapshot && this.latestSnapshot.value)
+      return Number.isFinite(fromSnapshot) ? fromSnapshot : 0
+    },
+    positionMarketValue () {
+      const equity = this.finalEquityValue
+      const cash = Number(this.latestSnapshot && this.latestSnapshot.cash)
+      return Number.isFinite(equity) ? equity - (Number.isFinite(cash) ? cash : 0) : 0
+    },
+    latestHoldingRows () {
+      const snapshots = Array.isArray(this.result.holdingSnapshots) ? this.result.holdingSnapshots : []
+      if (!snapshots.length) return []
+      const latest = snapshots[snapshots.length - 1] || {}
+      const positions = latest.positions || {}
+      return Object.keys(positions).map(symbol => {
+        const pos = positions[symbol] || {}
+        return {
+          symbol: formatSymbolDisplay(symbol, pos),
+          symbolRaw: symbol,
+          name: pos.name || '',
+          quantity: pos.quantity,
+          averageCost: pos.averageCost,
+          lastPrice: pos.lastPrice,
+          marketValue: pos.marketValue,
+          weight: pos.weight
+        }
+      }).sort((a, b) => Number(b.marketValue || 0) - Number(a.marketValue || 0))
+    },
+    latestHoldingColumns () {
+      return [
+        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', key: 'symbol', width: 200, ellipsis: true },
+        { title: this.$t('backtest-center.quantity'), dataIndex: 'quantity', key: 'quantity', width: 110, customRender: value => this.formatNumber(value, 0) },
+        { title: this.$t('strategyV2.backtest.averageCost'), dataIndex: 'averageCost', key: 'averageCost', width: 120, customRender: value => this.formatNumber(value, 4) },
+        { title: '现价', dataIndex: 'lastPrice', key: 'lastPrice', width: 110, customRender: value => this.formatNumber(value, 4) },
+        { title: this.$t('strategyV2.backtest.marketValue'), dataIndex: 'marketValue', key: 'marketValue', width: 130, customRender: value => this.formatMoney(value) },
+        { title: this.$t('strategyV2.backtest.weight'), dataIndex: 'weight', key: 'weight', width: 100, customRender: value => this.formatRate(value) }
+      ]
+    },
     rebalanceRows () { return this.result.rebalanceRecords || [] },
     holdingRows () {
-      return (this.result.holdingSnapshots || []).flatMap(snapshot => Object.keys(snapshot.positions || {}).map(symbol => ({ time: snapshot.time, symbol, ...snapshot.positions[symbol], cash: snapshot.cash, grossExposure: snapshot.grossExposure, netExposure: snapshot.netExposure }))).reverse()
+      return (this.result.holdingSnapshots || []).flatMap(snapshot => Object.keys(snapshot.positions || {}).map(symbol => {
+        const pos = snapshot.positions[symbol] || {}
+        return {
+          time: snapshot.time,
+          symbol,
+          ...pos,
+          cash: snapshot.cash,
+          grossExposure: snapshot.grossExposure,
+          netExposure: snapshot.netExposure
+        }
+      })).reverse()
     },
     tradeRows () { return this.result.closedTrades || this.result.trades || [] },
     executionRows () { return this.result.executions || this.result.rawTrades || [] },
@@ -337,35 +411,35 @@ export default {
         { title: this.$t('strategyV2.backtest.targetWeights'), dataIndex: 'targetWeights', width: 240, customRender: this.formatWeights },
         { title: this.$t('strategyV2.backtest.actualWeights'), dataIndex: 'actualWeights', width: 240, customRender: this.formatWeights },
         { title: this.$t('strategyV2.backtest.turnover'), dataIndex: 'turnover', customRender: this.formatRate },
-        { title: this.$t('strategyV2.backtest.cashAfter'), dataIndex: 'cashAfter', customRender: value => this.formatNumber(value) },
+        { title: this.$t('strategyV2.backtest.cashAfter'), dataIndex: 'cashAfter', customRender: value => this.formatMoney(value) },
         { title: this.$t('strategyV2.backtest.orderHealth'), key: 'health', customRender: (value, row) => `${row.filled || 0}/${row.partial || 0}/${row.deferred || 0}/${row.rejected || 0}` }
       ]
     },
     holdingColumns () {
       return [
         { title: this.$t('strategyV2.backtest.time'), dataIndex: 'time', width: 165, customRender: this.formatDate },
-        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 170 },
-        { title: this.$t('backtest-center.quantity'), dataIndex: 'quantity', customRender: value => this.formatNumber(value, 4) },
+        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 200, customRender: (value, row) => formatSymbolDisplay(value, row) },
+        { title: this.$t('backtest-center.quantity'), dataIndex: 'quantity', customRender: value => this.formatNumber(value, 0) },
         { title: this.$t('strategyV2.backtest.averageCost'), dataIndex: 'averageCost', customRender: value => this.formatNumber(value, 4) },
-        { title: this.$t('strategyV2.backtest.marketValue'), dataIndex: 'marketValue', customRender: value => this.formatNumber(value) },
+        { title: this.$t('strategyV2.backtest.marketValue'), dataIndex: 'marketValue', customRender: value => this.formatMoney(value) },
         { title: this.$t('strategyV2.backtest.weight'), dataIndex: 'weight', customRender: this.formatRate },
-        { title: this.$t('strategyV2.backtest.cash'), dataIndex: 'cash', customRender: value => this.formatNumber(value) }
+        { title: this.$t('strategyV2.backtest.cash'), dataIndex: 'cash', customRender: value => this.formatMoney(value) }
       ]
     },
     tradeColumns () {
       return [
-        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 165 },
+        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 200, customRender: (value, row) => formatSymbolDisplay(value, row) },
         { title: this.$t('backtest-center.tradeColumns.side'), dataIndex: 'side', width: 72 },
         { title: this.$t('backtest-center.tradeColumns.entryTime'), dataIndex: 'entry_time', width: 165, customRender: this.formatDate },
         { title: this.$t('backtest-center.tradeColumns.exitTime'), dataIndex: 'exit_time', width: 165, customRender: this.formatDate },
         { title: this.$t('backtest-center.tradeColumns.quantity'), dataIndex: 'quantity', customRender: value => this.formatNumber(value, 4) },
-        { title: this.$t('backtest-center.tradeColumns.valueUsd'), key: 'value_usd', customRender: (value, row) => this.formatNullableNumber(calculateTradeValueUsd(row)) },
+        { title: this.$t('backtest-center.tradeColumns.valueUsd'), key: 'value_usd', customRender: (value, row) => this.formatMoney(calculateTradeValueUsd(row)) },
         { title: this.$t('backtest-center.tradeColumns.entryPrice'), dataIndex: 'entry_price', customRender: value => this.formatNumber(value, 4) },
         { title: this.$t('backtest-center.tradeColumns.exitPrice'), dataIndex: 'exit_price', customRender: value => this.formatNumber(value, 4) },
-        { title: this.$t('trading-assistant.costs.openingCommission'), dataIndex: 'entry_commission', customRender: value => this.formatNumber(value, 4) },
-        { title: this.$t('trading-assistant.costs.closingCommission'), dataIndex: 'exit_commission', customRender: value => this.formatNumber(value, 4) },
+        { title: this.$t('trading-assistant.costs.openingCommission'), dataIndex: 'entry_commission', customRender: value => this.formatMoney(value, 4) },
+        { title: this.$t('trading-assistant.costs.closingCommission'), dataIndex: 'exit_commission', customRender: value => this.formatMoney(value, 4) },
         { title: this.$t('backtest-center.tradeColumns.profit'), dataIndex: 'profit', customRender: value => this.$createElement('span', { class: ['trade-profit', this.profitTone(value)] }, this.formatSignedNumber(value)) },
-        { title: this.$t('backtest-center.tradeColumns.balance'), dataIndex: 'balance', customRender: value => this.formatNumber(value) },
+        { title: this.$t('backtest-center.tradeColumns.balance'), dataIndex: 'balance', customRender: value => this.formatMoney(value) },
         { title: this.$t('backtest-center.tradeColumns.closeReason'), dataIndex: 'close_reason', width: 150 }
       ]
     },
@@ -373,36 +447,36 @@ export default {
       return [
         { title: this.$t('strategyV2.backtest.signalTime'), dataIndex: 'signal_time', width: 165, customRender: this.formatDate },
         { title: this.$t('strategyV2.backtest.fillTime'), dataIndex: 'time', width: 165, customRender: this.formatDate },
-        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 165 },
+        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 200, customRender: (value, row) => formatSymbolDisplay(value, row) },
         { title: this.$t('strategyV2.backtest.side'), dataIndex: 'side', width: 70 },
         { title: this.$t('backtest-center.quantity'), dataIndex: 'quantity', customRender: value => this.formatNumber(value, 6) },
         { title: this.$t('backtest-center.price'), dataIndex: 'price', customRender: value => this.formatNumber(value, 4) },
-        { title: this.$t('strategyV2.backtest.filledNotional'), dataIndex: 'notional', customRender: (value, row) => this.formatNumber(value !== undefined && value !== null ? value : Number(row.quantity || 0) * Number(row.price || 0)) },
-        { title: this.$t('backtest-center.commission'), dataIndex: 'commission', customRender: value => this.formatNumber(value, 4) },
+        { title: this.$t('strategyV2.backtest.filledNotional'), dataIndex: 'notional', customRender: (value, row) => this.formatMoney(value !== undefined && value !== null ? value : Number(row.quantity || 0) * Number(row.price || 0)) },
+        { title: this.$t('backtest-center.commission'), dataIndex: 'commission', customRender: value => this.formatMoney(value, 4) },
         { title: this.$t('strategyV2.backtest.orderStatusLabel'), dataIndex: 'status' },
         { title: this.$t('strategyV2.backtest.reason'), dataIndex: 'reason', width: 145 }
       ]
     },
     attributionColumns () {
       return [
-        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 180 },
+        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 200, customRender: (value, row) => formatSymbolDisplay(value, row) },
         { title: this.$t('strategyV2.backtest.industry'), dataIndex: 'industry' },
         { title: this.$t('strategyV2.backtest.realizedProfit'), dataIndex: 'realizedProfit', customRender: value => this.signedCell(value) },
         { title: this.$t('strategyV2.backtest.unrealizedProfit'), dataIndex: 'unrealizedProfit', customRender: value => this.signedCell(value) },
-        { title: this.$t('backtest-center.commission'), dataIndex: 'commission', customRender: value => this.formatNumber(value) },
+        { title: this.$t('backtest-center.commission'), dataIndex: 'commission', customRender: value => this.formatMoney(value) },
         { title: this.$t('strategyV2.backtest.netContribution'), dataIndex: 'netContribution', customRender: value => this.signedPercentCell(value) }
       ]
     },
     ledgerColumns () {
       return [
         { title: this.$t('strategyV2.backtest.time'), dataIndex: 'eventTime', width: 165, customRender: this.formatDate },
-        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 165 },
+        { title: this.$t('backtest-center.symbol'), dataIndex: 'symbol', width: 200, customRender: (value, row) => formatSymbolDisplay(value, row) },
         { title: this.$t('strategyV2.backtest.orderStatusLabel'), dataIndex: 'status', width: 90, customRender: value => this.$createElement('a-tag', { props: { color: this.statusColor(value) } }, this.$t(`strategyV2.backtest.orderStatus.${value}`)) },
         { title: this.$t('strategyV2.backtest.statusReason'), dataIndex: 'statusReason', width: 180, customRender: this.formatStatusReason },
         { title: this.$t('strategyV2.backtest.requestedQuantity'), dataIndex: 'requestedQuantity', customRender: value => this.formatNumber(value, 6) },
         { title: this.$t('strategyV2.backtest.filledQuantity'), dataIndex: 'filledQuantity', customRender: value => this.formatNumber(value, 6) },
         { title: this.$t('backtest-center.price'), dataIndex: 'price', customRender: value => this.formatNumber(value, 4) },
-        { title: this.$t('strategyV2.backtest.filledNotional'), key: 'filledNotional', customRender: (value, row) => this.formatNumber(Number(row.filledQuantity || 0) * Number(row.price || 0)) },
+        { title: this.$t('strategyV2.backtest.filledNotional'), key: 'filledNotional', customRender: (value, row) => this.formatMoney(Number(row.filledQuantity || 0) * Number(row.price || 0)) },
         { title: this.$t('strategyV2.backtest.attempt'), dataIndex: 'attempt' }
       ]
     }
@@ -454,7 +528,8 @@ export default {
       const benchmarkName = this.$t('strategyV2.backtest.benchmarkNormalized')
       this.chart.setOption({
         animationDuration: 260,
-        color: ['#52c41a', '#f5a623', '#ff4d4f', '#69c0ff', '#9254de', '#13c2c2'],
+        // A-share: red = up / performance, green = down / drawdown
+        color: ['#f5222d', '#f5a623', '#52c41a', '#69c0ff', '#9254de', '#13c2c2'],
         legend: { top: 2, left: 8, textStyle: { color: text } },
         tooltip: { trigger: 'axis', confine: true, axisPointer: { type: 'cross', snap: true }, backgroundColor: this.isDark ? 'rgba(14,14,14,.98)' : '#fff', borderColor: grid, textStyle: { color: this.isDark ? '#f5f5f5' : '#1f2937' } },
         axisPointer: { link: [{ xAxisIndex: [0, 1, 2] }] },
@@ -472,9 +547,9 @@ export default {
         ],
         dataZoom: [{ type: 'inside', xAxisIndex: [0, 1, 2], filterMode: 'none' }, { type: 'slider', xAxisIndex: [0, 1, 2], bottom: 0, height: 22, showDetail: false }],
         series: [
-          { name: strategyName, type: 'line', data: normalized, xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, lineStyle: { width: 2.2 }, areaStyle: { opacity: 0.06 } },
-          { name: benchmarkName, type: 'line', data: benchmark, xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, lineStyle: { width: 1.6, type: 'dashed' } },
-          { name: this.$t('strategyV2.backtest.drawdown'), type: 'line', data: drawdown, xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, areaStyle: { opacity: 0.22 }, lineStyle: { width: 1.4 } },
+          { name: strategyName, type: 'line', data: normalized, xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, itemStyle: { color: '#f5222d' }, lineStyle: { width: 2.2, color: '#f5222d' }, areaStyle: { opacity: 0.06, color: '#f5222d' } },
+          { name: benchmarkName, type: 'line', data: benchmark, xAxisIndex: 0, yAxisIndex: 0, showSymbol: false, itemStyle: { color: '#f5a623' }, lineStyle: { width: 1.6, type: 'dashed', color: '#f5a623' } },
+          { name: this.$t('strategyV2.backtest.drawdown'), type: 'line', data: drawdown, xAxisIndex: 1, yAxisIndex: 1, showSymbol: false, itemStyle: { color: '#52c41a' }, areaStyle: { opacity: 0.22, color: '#52c41a' }, lineStyle: { width: 1.4, color: '#52c41a' } },
           { name: this.$t('strategyV2.backtest.grossExposure'), type: 'line', data: gross, xAxisIndex: 2, yAxisIndex: 2, showSymbol: false },
           { name: this.$t('strategyV2.backtest.netExposure'), type: 'line', data: net, xAxisIndex: 2, yAxisIndex: 2, showSymbol: false },
           { name: this.$t('strategyV2.backtest.cash'), type: 'line', data: cash, xAxisIndex: 2, yAxisIndex: 3, showSymbol: false, lineStyle: { type: 'dotted' } }
@@ -503,7 +578,7 @@ export default {
             price: entryPrice,
             text: this.$t('strategyV2.backtest.entryMarker'),
             side: isShort ? 'sell' : 'buy',
-            color: isShort ? '#f6465d' : '#0ecb81'
+            color: isShort ? '#0ecb81' : '#f6465d'
           }))
         }
         if (Number.isFinite(exitPrice)) {
@@ -512,7 +587,7 @@ export default {
             price: exitPrice,
             text: this.$t('strategyV2.backtest.exitMarker'),
             side: isShort ? 'buy' : 'sell',
-            color: isShort ? '#0ecb81' : '#f6465d'
+            color: isShort ? '#f6465d' : '#0ecb81'
           }))
         }
         this.focusReviewRange(chart, entryTime, exitTime)
@@ -571,8 +646,15 @@ export default {
     formatRate (value) { return `${(Number(value || 0) * 100).toFixed(2)}%` },
     formatNumber (value, digits = 2) { const number = Number(value || 0); return Number.isFinite(number) ? number.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }) : '-' },
     formatNullableNumber (value, digits = 2) { return value === null || value === undefined ? '-' : this.formatNumber(value, digits) },
-    formatSignedNumber (value, digits = 2) { const number = Number(value || 0); return `${number > 0 ? '+' : ''}${this.formatNumber(number, digits)}` },
-    formatWeights (value) { return Object.entries(value || {}).map(([symbol, weight]) => `${symbol.split(':').pop().split('@')[0]} ${this.formatRate(weight)}`).join(' · ') || '-' },
+    formatMoney (value, digits = 2) { return formatMoneyCny(value, { digits }) },
+    formatSignedNumber (value, digits = 2) { return formatMoneyCny(value, { digits, signed: true }) },
+    formatWeights (value) {
+      return Object.entries(value || {}).map(([symbol, weight]) => {
+        const label = formatSymbolDisplay(symbol)
+        return `${label} ${this.formatRate(weight)}`
+      }).join(' · ') || '-'
+    },
+    formatSymbolDisplay,
     profitTone (value) { const number = Number(value || 0); return number > 0 ? 'positive' : number < 0 ? 'negative' : 'neutral' },
     signedCell (value) { return this.$createElement('span', { class: this.profitTone(value) }, this.formatSignedNumber(value)) },
     signedPercentCell (value) { return this.$createElement('span', { class: this.profitTone(value) }, this.formatPercent(Number(value || 0) * 100)) },
@@ -596,9 +678,14 @@ export default {
 .metric-label { display: inline-flex; align-items: center; gap: 5px; }
 .metric-label .anticon { cursor: help; }
 .metric-card strong { color: #20324a; font-size: 18px; font-variant-numeric: tabular-nums; }
-.positive { color: #16a34a !important; }
-.negative { color: #dc2626 !important; }
+.positive { color: #f5222d !important; }
+.negative { color: #52c41a !important; }
 .neutral { color: #94a3b8 !important; }
+.overview-grid--ashare { grid-template-columns: repeat(3, 1fr); }
+.overview-holdings { margin-top: 14px; }
+.overview-holdings .chart-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.overview-holdings .chart-heading h3 { margin: 0; font-size: 14px; font-weight: 700; }
+.overview-holdings .chart-heading span { color: #8c8c8c; font-size: 12px; }
 .chart-card { margin-top: 12px; padding: 13px; border: 1px solid #edf0f4; border-radius: 8px; }
 .chart-heading { display: flex; justify-content: space-between; gap: 16px; }
 .chart-heading h3 { margin: 0; color: #26364c; font-size: 14px; }

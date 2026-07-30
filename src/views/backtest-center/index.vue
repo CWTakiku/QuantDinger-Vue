@@ -273,7 +273,18 @@
         >
           <span class="run-card__top">
             <strong><a-icon v-if="historyDetailLoading && Number(historyDetailRunId) === Number(item.id)" type="loading" />{{ mode === 'factor' ? (item.source_name || item.factor_id) : (item.strategy_name || item.symbol) }}</strong>
-            <em>{{ mode === 'factor' ? 'FR-' : '#' }}{{ item.id }}</em>
+            <span class="run-card__actions">
+              <em>{{ mode === 'factor' ? 'FR-' : '#' }}{{ item.id }}</em>
+              <a-button
+                class="run-card__delete"
+                type="link"
+                size="small"
+                icon="delete"
+                :loading="historyDeletingId === Number(item.id)"
+                :disabled="historyDetailLoading || historyDeletingId != null"
+                @click.stop="confirmDeleteRun(item)"
+              />
+            </span>
           </span>
           <span class="run-card__meta">{{ item.market }} · {{ item.timeframe }} · {{ formatDate(item.created_at) }}</span>
           <template v-if="mode === 'factor'">
@@ -309,8 +320,10 @@ import {
   getScriptSourceList,
   getStrategyFactorResearchHistory,
   getStrategyFactorResearchRun,
+  deleteStrategyFactorResearchRun,
   getStrategyBacktestHistory,
   getStrategyBacktestRun,
+  deleteStrategyBacktestRun,
   runStrategyFactorResearch,
   runStrategyBacktest
 } from '@/api/strategy'
@@ -340,6 +353,7 @@ export default {
       historyVisible: false,
       historyDetailLoading: false,
       historyDetailRunId: null,
+      historyDeletingId: null,
       equityChart: null,
       chartResizeObserver: null,
       form: {
@@ -625,7 +639,7 @@ export default {
       }
       this.equityChart.setOption({
         animationDuration: 350,
-        color: ['#52c41a', '#f5a623'],
+        color: ['#f5222d', '#f5a623'],
         grid: { left: 12, right: 18, top: 46, bottom: 58, containLabel: true },
         legend: { top: 4, left: 4, textStyle: { color: textColor }, data: benchmarkData.length ? [strategyName, benchmarkName] : [strategyName] },
         tooltip: {
@@ -982,6 +996,45 @@ export default {
     historyReturnTone (item) {
       if (item.result_status === 'no_signals') return 'neutral'
       return Number(item.total_return) >= 0 ? 'positive' : 'negative'
+    },
+    confirmDeleteRun (item) {
+      const runId = Number(item && item.id)
+      if (!runId) return
+      this.$confirm({
+        title: this.$t('strategyV2.backtest.deleteConfirmTitle'),
+        content: this.$t('strategyV2.backtest.deleteConfirmContent', {
+          id: `${this.mode === 'factor' ? 'FR-' : '#'}${runId}`
+        }),
+        okType: 'danger',
+        okText: this.$t('strategyV2.backtest.delete'),
+        cancelText: this.$t('strategyV2.backtest.cancel'),
+        onOk: () => this.deleteRun(item)
+      })
+    },
+    async deleteRun (item) {
+      const runId = Number(item && item.id)
+      if (!runId || this.historyDeletingId != null) return
+      this.historyDeletingId = runId
+      try {
+        if (this.mode === 'factor') {
+          await deleteStrategyFactorResearchRun(runId)
+          this.factorHistory = this.factorHistory.filter(row => Number(row.id) !== runId)
+        } else {
+          await deleteStrategyBacktestRun(runId)
+          this.portfolioHistory = this.portfolioHistory.filter(row => Number(row.id) !== runId)
+        }
+        const selectedId = Number((this.selectedRun && (this.selectedRun.id || this.selectedRun.runId)) || 0)
+        if (selectedId === runId) {
+          this.selectedRun = null
+          this.result = null
+          this.factorResult = null
+        }
+        this.$message.success(this.$t('strategyV2.backtest.deleteSuccess'))
+      } catch (error) {
+        this.$message.error((error && error.backendMessage) || this.$t('strategyV2.backtest.deleteFailed'))
+      } finally {
+        this.historyDeletingId = null
+      }
     }
   }
 }
@@ -1026,8 +1079,8 @@ export default {
 .metrics-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .metric-card { padding: 13px; border: 1px solid #edf0f4; border-radius: 9px; background: #f7f9fc; }
 .metric-card strong { font-size: 20px; color: #20324a; }
-.positive { color: #16a34a !important; }
-.negative { color: #dc2626 !important; }
+.positive { color: #f5222d !important; }
+.negative { color: #52c41a !important; }
 .trade-profit { font-weight: 700; font-variant-numeric: tabular-nums; }
 .neutral { color: #94a3b8 !important; }
 .run-id { color: #8a97aa; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -1083,6 +1136,9 @@ export default {
 .run-card { display: flex; min-width: 0; flex-direction: column; gap: 6px; padding: 11px; border: 1px solid #e6eaf0; border-radius: 9px; background: #fafbfc; color: inherit; text-align: left; cursor: pointer; transition: 0.16s ease; }
 .run-card:hover, .run-card.active { border-color: #85ce62; background: #fbfff8; transform: translateY(-1px); }
 .run-card__top, .run-card__metrics { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.run-card__actions { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.run-card__delete { color: #94a3b8 !important; padding: 0 4px !important; height: auto !important; line-height: 1 !important; }
+.run-card__delete:hover { color: #ff4d4f !important; }
 .run-card__top strong { min-width: 0; overflow: hidden; color: #2a3b52; text-overflow: ellipsis; white-space: nowrap; }
 .run-card__top em { color: #9aa5b5; font-style: normal; font-size: 11px; }
 .run-card__meta { overflow: hidden; color: #8491a4; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1137,4 +1193,6 @@ export default {
 .backtest-history-drawer.theme-dark .run-card.active { border-color: #52c41a; background: #15230f; }
 .backtest-history-drawer.theme-dark .drawer-detail-loading { border-color: rgba(82, 196, 26, .38); color: #73d13d; background: #10190c; }
 .backtest-history-drawer.theme-dark .run-card__top strong { color: #e5e7eb; }
+.backtest-history-drawer.theme-dark .run-card__delete { color: rgba(255,255,255,.45) !important; }
+.backtest-history-drawer.theme-dark .run-card__delete:hover { color: #ff7875 !important; }
 </style>

@@ -461,11 +461,11 @@ export default {
     formatMoney (value) {
       if (value === null || value === undefined) return '--'
       const sign = value >= 0 ? '+' : '-'
-      return `${sign}$${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      return `${sign}¥${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     },
     formatMoneyValue (value) {
       const number = Number(value || 0)
-      return `$${Math.abs(number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
+      return `¥${Math.abs(number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
     },
     formatSignedMoney (value) {
       const number = Number(value || 0)
@@ -474,7 +474,7 @@ export default {
     },
     formatExpense (value) {
       const number = Math.abs(Number(value || 0))
-      return number > 0 ? `-${this.formatMoneyValue(number)}` : '$0.00'
+      return number > 0 ? `-${this.formatMoneyValue(number)}` : '¥0.00'
     },
     moneyTone (value) {
       const number = Number(value || 0)
@@ -551,8 +551,8 @@ export default {
 
 <style lang="less" scoped>
 @primary-color: #1890ff;
-@success-color: #0ecb81;
-@danger-color: #f6465d;
+@success-color: #f6465d;
+@danger-color: #0ecb81;
 
 .trading-records {
   width: 100%;

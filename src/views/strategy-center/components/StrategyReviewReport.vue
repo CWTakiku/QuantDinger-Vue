@@ -408,7 +408,7 @@ export default {
       const n = Number(value)
       if (!isFinite(n)) return '--'
       const sign = signed && n > 0 ? '+' : ''
-      return `${sign}$${n.toFixed(2)}`
+      return `${sign}¥${n.toFixed(2)}`
     },
     formatPercent (value) {
       const n = Number(value)

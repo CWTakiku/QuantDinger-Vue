@@ -1013,15 +1013,15 @@ export default {
       codePanelExpanded: true,
       paramsPanelExpanded: true,
 
-      market: 'Crypto',
-      symbol: 'BTC/USDT',
+      market: 'CNStock',
+      symbol: '600519',
       timeframe: '1D',
       cryptoExchangeId: 'binance',
       cryptoMarketType: 'spot',
       currentInstrumentId: '',
       cryptoExchangeIds: CRYPTO_EXCHANGE_IDS,
       watchlist: [],
-      selectedWatchlistKey: 'Crypto:BTC/USDT',
+      selectedWatchlistKey: 'CNStock:600519',
 
       activeIndicators: [],
       chartIndicatorRunning: true,
@@ -1048,10 +1048,10 @@ export default {
       },
       signalAlertTimeframes: ['1m', '5m', '15m', '30m', '1H', '4H', '1D', '1W'],
       signalAlertForm: {
-        watchlistKey: 'Crypto:BTC/USDT',
-        market: 'Crypto',
-        symbol: 'BTC/USDT',
-        symbolName: 'Bitcoin',
+        watchlistKey: 'CNStock:600519',
+        market: 'CNStock',
+        symbol: '600519',
+        symbolName: '',
         timeframe: '1D',
         signalKeys: ['any'],
         channels: ['browser'],
@@ -1082,7 +1082,7 @@ export default {
       codeQualityLoading: false,
 
       // Quick Trade drawer reuse
-      qtSymbol: 'BTC/USDT',
+      qtSymbol: '600519',
       qtSide: '',
       qtPrice: 0,
 
@@ -1104,7 +1104,7 @@ export default {
 
       showAddModal: false,
       addingStock: false,
-      addMarketTab: 'Crypto',
+      addMarketTab: 'CNStock',
       addSearchKeyword: '',
       addSearchResults: [],
       addSelectedItem: null,
@@ -1364,11 +1364,11 @@ export default {
             instrument_id: this.currentInstrumentId
           })
         } else if (s.selectedWatchlistKey && typeof s.selectedWatchlistKey === 'string') {
-          const [m, sym] = s.selectedWatchlistKey.split(':')
-          if (m && sym) {
-            this.market = m
-            this.symbol = sym
-            this.qtSymbol = sym
+          const i = s.selectedWatchlistKey.indexOf(':')
+          if (i > 0) {
+            this.market = s.selectedWatchlistKey.slice(0, i)
+            this.symbol = s.selectedWatchlistKey.slice(i + 1)
+            this.qtSymbol = this.symbol
             this.selectedWatchlistKey = s.selectedWatchlistKey
           }
         }
@@ -1526,6 +1526,14 @@ export default {
         this.market = String(row.market)
         this.symbol = String(row.symbol)
         this.qtSymbol = this.symbol
+      }
+      // Guard: 6-digit A-share codes must never stay on Crypto (breaks price/kline APIs).
+      const sym = String(this.symbol || this.qtSymbol || '').trim()
+      if (/^\d{6}$/.test(sym) && this.market !== 'CNStock') {
+        this.market = 'CNStock'
+        this.symbol = sym
+        this.qtSymbol = sym
+        this.selectedWatchlistKey = marketContextKey({ market: 'CNStock', symbol: sym })
       }
     },
 

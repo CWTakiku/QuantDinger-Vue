@@ -568,14 +568,6 @@ export default {
           singleAsItem: true
         },
         {
-          name: 'MenuGroupCommunity',
-          path: '/menu-group/indicator-community',
-          title: this.$t('menu.dashboard.community') || 'Marketplace',
-          icon: 'shop',
-          paths: ['/indicator-community'],
-          singleAsItem: true
-        },
-        {
           name: 'MenuGroupIndicator',
           path: '/menu-group/indicator-chart',
           title: this.$t('menu.dashboard.indicatorIde') || 'Indicators',

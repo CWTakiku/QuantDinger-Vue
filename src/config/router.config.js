@@ -28,10 +28,11 @@ export const asyncRouterMap = [
         component: () => import('@/views/strategy-center'),
         meta: { title: 'menu.dashboard.strategyCenter', keepAlive: true, icon: 'cluster', permission: ['dashboard'] }
       },
-      // Indicator marketplace.
+      // Indicator marketplace (hidden for A-share local deploy).
       {
         path: '/indicator-community',
         name: 'IndicatorCommunity',
+        hidden: true,
         component: () => import('@/views/indicator-community'),
         meta: { title: 'menu.dashboard.community', keepAlive: false, icon: 'shop', permission: ['dashboard'] }
       },

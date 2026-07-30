@@ -125,7 +125,7 @@ export default {
       const rolling = (this.result.icSeries || []).filter(point => point.rolling != null).map(point => [moment(point.time).valueOf(), Number(point.rolling)])
       this.chart.setOption({
         animationDuration: 260,
-        color: ['#52c41a', '#69c0ff', '#9254de', '#faad14', '#ff7875', '#13c2c2', '#2f54eb'],
+        color: ['#f5222d', '#69c0ff', '#9254de', '#faad14', '#ff7875', '#13c2c2', '#2f54eb'],
         tooltip: { trigger: 'axis', confine: true, axisPointer: { type: 'cross' }, backgroundColor: this.isDark ? 'rgba(14,14,14,.98)' : '#fff', borderColor: grid, textStyle: { color: this.isDark ? '#f5f5f5' : '#1f2937' } },
         legend: [{ top: 0, left: 8, textStyle: { color: text } }, { top: 350, left: 8, textStyle: { color: text } }],
         axisPointer: { link: [{ xAxisIndex: [0, 1] }] },
@@ -139,7 +139,7 @@ export default {
         series: [
           ...groupSeries,
           { name: this.$t('strategyV2.factorResearch.longShortNetValue'), type: 'line', data: longShort, showSymbol: false, xAxisIndex: 0, yAxisIndex: 0, lineStyle: { width: 2.6, type: 'dashed' } },
-          { name: this.$t('strategyV2.factorResearch.rankIc'), type: 'bar', data: ic, xAxisIndex: 1, yAxisIndex: 1, itemStyle: { color: params => Number(params.value[1]) >= 0 ? '#52c41a' : '#ff4d4f' } },
+          { name: this.$t('strategyV2.factorResearch.rankIc'), type: 'bar', data: ic, xAxisIndex: 1, yAxisIndex: 1, itemStyle: { color: params => Number(params.value[1]) >= 0 ? '#f5222d' : '#52c41a' } },
           { name: this.$t('strategyV2.factorResearch.rollingIc'), type: 'line', data: rolling, showSymbol: false, xAxisIndex: 1, yAxisIndex: 1, lineStyle: { width: 2 } }
         ]
       }, true)
@@ -151,7 +151,7 @@ export default {
     tone (value) { const number = Number(value || 0); return number > 0 ? 'positive' : number < 0 ? 'negative' : '' },
     signedCell (value, digits = 2) { return this.$createElement('span', { class: this.tone(value) }, `${Number(value) > 0 ? '+' : ''}${this.formatNumber(value, digits)}`) },
     percentCell (value) { return this.$createElement('span', { class: this.tone(value) }, `${Number(value) > 0 ? '+' : ''}${this.formatRate(value)}`) },
-    correlationCellStyle (value) { const alpha = Math.min(0.8, Math.abs(Number(value || 0)) * 0.75 + 0.08); return { background: Number(value) >= 0 ? `rgba(82,196,26,${alpha})` : `rgba(255,77,79,${alpha})` } }
+    correlationCellStyle (value) { const alpha = Math.min(0.8, Math.abs(Number(value || 0)) * 0.75 + 0.08); return { background: Number(value) >= 0 ? `rgba(245,34,45,${alpha})` : `rgba(82,196,26,${alpha})` } }
   }
 }
 </script>
@@ -162,8 +162,8 @@ export default {
 .metric-card { display: flex; flex-direction: column; gap: 3px; }
 .metric-card span, .overview-card span { color: #7c8ca1; font-size: 11px; }
 .metric-card strong { color: #20324a; font-size: 18px; }
-.positive { color: #16a34a !important; }
-.negative { color: #dc2626 !important; }
+.positive { color: #f5222d !important; }
+.negative { color: #52c41a !important; }
 .chart-card { margin-top: 12px; padding: 13px; border: 1px solid #edf0f4; border-radius: 8px; }
 .chart-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .chart-heading h3 { margin: 0; color: #26364c; font-size: 14px; }
