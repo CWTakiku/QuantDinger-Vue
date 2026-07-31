@@ -289,6 +289,7 @@
                         size="small"
                         show-search
                         allow-clear
+                        option-label-prop="label"
                         :filter-option="filterWatchlistOption"
                         :dropdown-class-name="isDarkTheme ? 'ide-watchlist-dropdown ide-watchlist-dropdown--dark' : 'ide-watchlist-dropdown'"
                         :get-popup-container="chartToolbarGetPopupContainer"
@@ -298,10 +299,11 @@
                           v-for="w in watchlist"
                           :key="watchlistContextKey(w)"
                           :value="watchlistContextKey(w)"
+                          :label="watchlistSelectLabel(w)"
                         >
                           <span class="wl-opt-tag" :class="'wl-mkt-' + (w.market || '').toLowerCase()">{{ marketLabel(w.market) }}</span>
-                          <strong class="wl-opt-symbol">{{ w.symbol }}</strong>
-                          <span v-if="w.name" class="wl-opt-name">{{ w.name }}</span>
+                          <strong class="wl-opt-symbol">{{ watchlistSelectLabel(w) }}</strong>
+                          <span v-if="w.name && w.symbol && String(w.name).trim() !== String(w.symbol).trim()" class="wl-opt-name">{{ w.symbol }}</span>
                         </a-select-option>
                         <a-select-option key="__add__" value="__add__" class="add-option">
                           <div class="ide-watchlist-add-row">
@@ -683,6 +685,7 @@
                   v-model="signalAlertForm.watchlistKey"
                   size="small"
                   show-search
+                  option-label-prop="label"
                   :filter-option="filterWatchlistOption"
                   :get-popup-container="ideModalGetContainer"
                   @change="onSignalAlertWatchlistChange"
@@ -691,10 +694,11 @@
                     v-for="w in signalAlertWatchlistOptions"
                     :key="`${w.market}:${w.symbol}`"
                     :value="`${w.market}:${w.symbol}`"
+                    :label="watchlistSelectLabel(w)"
                   >
                     <span class="wl-opt-tag" :class="'wl-mkt-' + (w.market || '').toLowerCase()">{{ marketLabel(w.market) }}</span>
-                    <strong class="wl-opt-symbol">{{ w.symbol }}</strong>
-                    <span v-if="w.name" class="wl-opt-name">{{ w.name }}</span>
+                    <strong class="wl-opt-symbol">{{ watchlistSelectLabel(w) }}</strong>
+                    <span v-if="w.name && w.symbol && String(w.name).trim() !== String(w.symbol).trim()" class="wl-opt-name">{{ w.symbol }}</span>
                   </a-select-option>
                 </a-select>
               </div>
@@ -3185,10 +3189,20 @@ export default {
     watchlistContextKey (item) {
       return marketContextKey(item)
     },
+    watchlistSelectLabel (item) {
+      if (!item) return ''
+      const sym = String(item.symbol || '').trim()
+      const nm = String(item.name || '').trim()
+      if (nm && nm.toUpperCase() !== sym.toUpperCase()) return nm
+      return sym || String(this.watchlistContextKey(item) || '')
+    },
     filterWatchlistOption (input, option) {
-      const val = (option.componentOptions.propsData.value || '').toLowerCase()
+      const props = (option.componentOptions && option.componentOptions.propsData) || {}
+      const val = String(props.value || '').toLowerCase()
       if (val === '__add__') return true
-      return val.includes(input.toLowerCase())
+      const q = String(input || '').toLowerCase()
+      const label = String(props.label || '').toLowerCase()
+      return val.includes(q) || (label && label.includes(q))
     },
     handleWatchlistChange (val) {
       if (val === '__add__') {

@@ -5256,6 +5256,8 @@ const locale = {
   "strategyV2.params.kdjOverboughtDesc": "New long entries are blocked when K is above this level.",
   "strategyV2.params.targetPosition": "Target position",
   "strategyV2.params.targetPositionDesc": "Fraction of account equity allocated after an entry signal.",
+  "strategyV2.backtest.runFailed": "Backtest failed",
+  "strategyV2.factorResearch.runFailed": "Factor research failed",
   "trading-assistant.templateParam.slow_period.label": "Slow period",
   "trading-assistant.templateParam.slow_period.desc": "Long EMA length used to confirm the main trend.",
   "trading-assistant.templateParam.position_pct.label": "Position allocation",

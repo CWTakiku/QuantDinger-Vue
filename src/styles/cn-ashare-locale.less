@@ -1,4 +1,9 @@
-/* A-share locale: RMB-friendly labels + 红涨绿跌 + hide sidebar logo */
+/* A-share locale: 红涨绿跌 + hide sidebar logo */
+
+@cn-up: #f5222d;
+@cn-down: #52c41a;
+@cn-up-soft: rgba(245, 34, 45, 0.12);
+@cn-down-soft: rgba(82, 196, 26, 0.12);
 
 .profit,
 .pnl-positive,
@@ -6,7 +11,7 @@
 .ta-pnl-pos,
 .positive,
 .tone-success .metric-value {
-  color: #f5222d !important;
+  color: @cn-up !important;
 }
 
 .loss,
@@ -15,21 +20,64 @@
 .ta-pnl-neg,
 .negative,
 .tone-danger .metric-value {
-  color: #52c41a !important;
+  color: @cn-down !important;
 }
 
 .metric-card.positive .metric-value,
 .metric-card.positive strong,
 strong.positive,
 .trade-profit.positive {
-  color: #f5222d !important;
+  color: @cn-up !important;
 }
 
 .metric-card.negative .metric-value,
 .metric-card.negative strong,
 strong.negative,
 .trade-profit.negative {
-  color: #52c41a !important;
+  color: @cn-down !important;
+}
+
+/* Watchlist / AI analysis change pills */
+.idx-change.up,
+.wl-change.up,
+.wl-pnl-val.up,
+.sc-num.up,
+.watch-change.up,
+.price-change.positive {
+  color: @cn-up !important;
+}
+
+.idx-change.down,
+.wl-change.down,
+.wl-pnl-val.down,
+.sc-num.down,
+.watch-change.down,
+.price-change.negative {
+  color: @cn-down !important;
+}
+
+.wl-change.up,
+.watch-change.up {
+  background: @cn-up-soft !important;
+}
+
+.wl-change.down,
+.watch-change.down {
+  background: @cn-down-soft !important;
+}
+
+/* Dark theme watchlist pills */
+.theme-dark .wl-change.up,
+body.colorWeak .wl-change.up,
+.watchlist-panel .wl-change.up {
+  color: #ff7875 !important;
+  background: rgba(245, 34, 45, 0.16) !important;
+}
+
+.theme-dark .wl-change.down,
+.watchlist-panel .wl-change.down {
+  color: #95de64 !important;
+  background: rgba(82, 196, 26, 0.14) !important;
 }
 
 .overview-holdings {

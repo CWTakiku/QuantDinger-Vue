@@ -5342,13 +5342,13 @@ export default {
 }
 
 .watch-change.up {
-  color: var(--qd-green);
-  background: rgba(10, 163, 117, 0.12);
+  color: #f5222d;
+  background: rgba(245, 34, 45, 0.12);
 }
 
 .watch-change.down {
-  color: var(--qd-red);
-  background: rgba(229, 75, 75, 0.12);
+  color: #52c41a;
+  background: rgba(82, 196, 26, 0.12);
 }
 
 .watch-actions {
@@ -5409,11 +5409,11 @@ export default {
 }
 
 .up {
-  color: var(--qd-green);
+  color: #f5222d;
 }
 
 .down {
-  color: var(--qd-red);
+  color: #52c41a;
 }
 
 .event-title-row {

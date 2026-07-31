@@ -216,6 +216,17 @@
         </div>
 
         <div v-else-if="!activeResult" class="result-empty" data-testid="backtest-empty">
+          <a-alert
+            v-if="runError"
+            class="run-error-alert"
+            type="error"
+            show-icon
+            closable
+            data-testid="backtest-run-error"
+            :message="$t('strategyV2.backtest.runFailed')"
+            :description="runError"
+            @close="runError = ''"
+          />
           <div class="empty-hero-card">
             <div class="empty-orbit"><a-icon type="line-chart" /></div>
             <h3>{{ emptyResultTitle }}</h3>
@@ -368,6 +379,7 @@ export default {
       factorResult: null,
       selectedRun: null,
       running: false,
+      runError: '',
       runElapsedSeconds: 0,
       runTimer: null,
       historyLoading: false,
@@ -859,12 +871,7 @@ export default {
             this.$message.info(this.$t('backtest-center.stopped'))
             return
           }
-          this.$message.error(
-            (error && error.backendMessage) ||
-            (session.mode === 'factor'
-              ? this.$t('strategyV2.factorResearch.runFailed')
-              : this.$t('strategyV2.backtest.runFailed'))
-          )
+          this.showRunError(error, session.mode)
         } finally {
           if (getBacktestRunSession().id === session.id) {
             this.stopRunTimer()
@@ -878,8 +885,59 @@ export default {
         this.applyRunResult(session.mode, session.result)
         clearBacktestRunSession(session.id)
       } else if (session.error) {
+        this.showRunError(session.error, session.mode)
         clearBacktestRunSession(session.id)
       }
+    },
+    formatBacktestError (error, mode = 'portfolio') {
+      const fallback = mode === 'factor'
+        ? this.$t('strategyV2.factorResearch.runFailed')
+        : this.$t('strategyV2.backtest.runFailed')
+      if (!error) return fallback
+      const data = error.response && error.response.data
+      const candidates = [
+        error.backendMessage,
+        data && data.msg,
+        data && data.message,
+        data && data.data && data.data.msg,
+        data && data.data && data.data.error,
+        error.message
+      ]
+      for (const item of candidates) {
+        const text = String(item || '').trim()
+        if (!text) continue
+        if (/^request failed with status code \d+$/i.test(text)) continue
+        if (text === 'Network Error') continue
+        return text
+      }
+      const status = error.response && error.response.status
+      return status ? `${fallback} (HTTP ${status})` : fallback
+    },
+    showRunError (error, mode = 'portfolio') {
+      const message = this.formatBacktestError(error, mode)
+      this.runError = message
+      this.$message.error(message, 8)
+      if (this.$notification && typeof this.$notification.error === 'function') {
+        this.$notification.error({
+          message: mode === 'factor'
+            ? this.$t('strategyV2.factorResearch.runFailed')
+            : this.$t('strategyV2.backtest.runFailed'),
+          description: message,
+          duration: 10
+        })
+      }
+    },
+    unwrapBacktestEnvelope (envelope, mode = 'portfolio') {
+      if (!envelope || typeof envelope !== 'object') return envelope
+      // request interceptor already returns response body { code, msg, data }
+      if (Object.prototype.hasOwnProperty.call(envelope, 'code') && Number(envelope.code) !== 1) {
+        const err = new Error(String(envelope.msg || envelope.message || 'backtest failed'))
+        err.backendMessage = String(envelope.msg || envelope.message || '')
+        err.response = { status: 400, data: envelope }
+        throw err
+      }
+      if (Object.prototype.hasOwnProperty.call(envelope, 'data')) return envelope.data
+      return envelope
     },
     async run () {
       if (!this.form.sourceId) {
@@ -905,11 +963,12 @@ export default {
       const session = startBacktestRunSession({
         mode: 'portfolio',
         runner: async (signal) => {
-          const response = await runStrategyBacktest(payload, { signal })
-          return response.data
+          const envelope = await runStrategyBacktest(payload, { signal })
+          return this.unwrapBacktestEnvelope(envelope, 'portfolio')
         }
       })
       this.running = true
+      this.runError = ''
       this.result = null
       this.selectedRun = null
       this.startRunTimer(session.startedAt)
@@ -924,7 +983,7 @@ export default {
           this.$message.info(this.$t('backtest-center.stopped'))
           return
         }
-        this.$message.error((error && error.backendMessage) || this.$t('strategyV2.backtest.runFailed'))
+        this.showRunError(error, 'portfolio')
       } finally {
         if (getBacktestRunSession().id === session.id) {
           this.stopRunTimer()
@@ -957,11 +1016,12 @@ export default {
       const session = startBacktestRunSession({
         mode: 'factor',
         runner: async (signal) => {
-          const response = await runStrategyFactorResearch(payload, { signal })
-          return response.data
+          const envelope = await runStrategyFactorResearch(payload, { signal })
+          return this.unwrapBacktestEnvelope(envelope, 'factor')
         }
       })
       this.running = true
+      this.runError = ''
       this.factorResult = null
       this.startRunTimer(session.startedAt)
       try {
@@ -975,7 +1035,7 @@ export default {
           this.$message.info(this.$t('backtest-center.stopped'))
           return
         }
-        this.$message.error((error && error.backendMessage) || this.$t('strategyV2.factorResearch.runFailed'))
+        this.showRunError(error, 'factor')
       } finally {
         if (getBacktestRunSession().id === session.id) {
           this.stopRunTimer()
@@ -1206,6 +1266,7 @@ export default {
 .neutral { color: #94a3b8 !important; }
 .run-id { color: #8a97aa; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .result-empty { position: relative; min-height: calc(100vh - 265px); display: flex; overflow: hidden; flex-direction: column; align-items: center; justify-content: center; padding: 52px 30px; text-align: center; }
+.run-error-alert { position: relative; z-index: 2; width: 100%; max-width: 720px; margin: 0 0 18px; text-align: left; }
 .result-empty::before, .result-empty::after { position: absolute; width: 320px; height: 320px; border-radius: 50%; content: ''; pointer-events: none; filter: blur(2px); }
 .result-empty::before { top: 9%; right: 5%; background: radial-gradient(circle, rgba(82, 196, 26, .075), rgba(82, 196, 26, 0) 70%); }
 .result-empty::after { bottom: 3%; left: 4%; background: radial-gradient(circle, rgba(24, 144, 255, .055), rgba(24, 144, 255, 0) 70%); }

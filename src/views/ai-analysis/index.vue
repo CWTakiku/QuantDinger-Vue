@@ -363,7 +363,7 @@ class="analyze-button">
                       <polyline
                         :points="getSparklinePoints(stock)"
                         fill="none"
-                        :stroke="(watchlistPrices[`${stock.market}:${stock.symbol}`]?.change || 0) >= 0 ? '#10b981' : '#ef4444'"
+                        :stroke="(watchlistPrices[`${stock.market}:${stock.symbol}`]?.change || 0) >= 0 ? '#f5222d' : '#52c41a'"
                         stroke-width="1.5"
                         stroke-linecap="round"
                         stroke-linejoin="round"
@@ -2739,8 +2739,8 @@ export default {
         display: flex;
         align-items: center;
         gap: 1px;
-        &.up { color: #16a34a; }
-        &.down { color: #dc2626; }
+        &.up { color: #f5222d; }
+        &.down { color: #52c41a; }
       }
     }
   }
@@ -2973,8 +2973,8 @@ export default {
           color: #475569;
           font-weight: 600;
           line-height: 1.5;
-          &.up { background: #dcfce7; color: #15803d; }
-          &.down { background: #fee2e2; color: #b91c1c; }
+          &.up { background: #fee2e2; color: #b91c1c; }
+          &.down { background: #dcfce7; color: #15803d; }
           &.volatility { background: #fef3c7; color: #92400e; }
         }
       }
@@ -3541,8 +3541,8 @@ export default {
         .cal-ai-asset {
           background: rgba(99, 102, 241, 0.16);
           color: #c7d2fe;
-          &.up { background: rgba(34, 197, 94, 0.14); color: #86efac; }
-          &.down { background: rgba(239, 68, 68, 0.14); color: #fca5a5; }
+          &.up { background: rgba(239, 68, 68, 0.14); color: #fca5a5; }
+          &.down { background: rgba(34, 197, 94, 0.14); color: #86efac; }
           &.volatility { background: rgba(245, 158, 11, 0.14); color: #fcd34d; }
         }
       }
@@ -3582,8 +3582,8 @@ export default {
     &:hover { border-color: var(--primary-color, #1890ff); color: var(--primary-color, #1890ff); }
   }
 
-  .wl-change.up { background: rgba(74,222,128,0.10); }
-  .wl-change.down { background: rgba(248,113,113,0.10); }
+  .wl-change.up { background: rgba(245,34,45,0.14); color: #ff7875; }
+  .wl-change.down { background: rgba(82,196,26,0.14); color: #95de64; }
 
   .panel-header-icon { color: #666; }
   .panel-header-icon:hover { color: var(--primary-color, #1890ff); background: color-mix(in srgb, var(--primary-color, #1890ff) 10%, transparent); }
@@ -3871,8 +3871,8 @@ export default {
   line-height: 1.2;
   font-family: 'SF Mono', Monaco, monospace;
 }
-.sc-num.up { color: #16a34a; }
-.sc-num.down { color: #dc2626; }
+.sc-num.up { color: #f5222d; }
+.sc-num.down { color: #52c41a; }
 .sc-label {
   font-size: 9px;
   color: #94a3b8;
@@ -4028,8 +4028,8 @@ export default {
   border-radius: 4px;
   margin-left: 4px;
 }
-.wl-change.up { color: #16a34a; background: rgba(22,163,74,0.08); }
-.wl-change.down { color: #dc2626; background: rgba(220,38,38,0.06); }
+.wl-change.up { color: #f5222d; background: rgba(245,34,45,0.10); }
+.wl-change.down { color: #52c41a; background: rgba(82,196,26,0.10); }
 
 .wl-row-pnl {
   display: flex;
@@ -4047,8 +4047,8 @@ export default {
   font-weight: 600;
   margin-left: auto;
 }
-.wl-pnl-val.up { color: #16a34a; }
-.wl-pnl-val.down { color: #dc2626; }
+.wl-pnl-val.up { color: #f5222d; }
+.wl-pnl-val.down { color: #52c41a; }
 
 .wl-row-task {
   display: flex;

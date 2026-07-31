@@ -6266,6 +6266,8 @@ const locale = {
   "brokerAccounts.tabPositions": "持仓",
   "brokerAccounts.tabOrders": "订单记录",
   "strategyV2.startQueued": "策略启动指令已提交，正在等待执行进程确认。",
+  "strategyV2.backtest.runFailed": "回测失败",
+  "strategyV2.factorResearch.runFailed": "因子研究失败",
   "universeManager.nameRequired": "请输入标的池名称。",
   "exception.backHome": "返回首页",
   "exception.403.subtitle": "抱歉，您没有权限访问此页面。",

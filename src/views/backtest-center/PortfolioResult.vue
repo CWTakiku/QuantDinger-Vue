@@ -209,12 +209,15 @@
       :destroy-on-close="true"
     >
       <div v-if="selectedTrade.symbol" class="review-summary">
+        <a-tag color="blue">{{ $t('strategyV2.backtest.symbolRoundTrips', { count: reviewSymbolTrades.length }) }}</a-tag>
+        <a-tag v-if="reviewSymbolExecutions.length" color="cyan">{{ $t('strategyV2.backtest.symbolFills', { count: reviewSymbolExecutions.length }) }}</a-tag>
         <span>{{ formatDate(selectedTrade.entry_time) }}</span>
         <strong>{{ formatNumber(selectedTrade.entry_price, 4) }}</strong>
         <a-icon type="arrow-right" />
         <span>{{ formatDate(selectedTrade.exit_time) }}</span>
         <strong>{{ formatNumber(selectedTrade.exit_price, 4) }}</strong>
         <b :class="profitTone(selectedTrade.profit)">{{ formatSignedNumber(selectedTrade.profit) }}</b>
+        <em class="review-summary-hint">{{ $t('strategyV2.backtest.chartShowsAllFills') }}</em>
       </div>
       <div class="review-chart-shell">
         <kline-chart
@@ -244,10 +247,14 @@ import * as echarts from 'echarts'
 import moment from 'moment'
 import KlineChart from '@/views/indicator-analysis/components/KlineChart.vue'
 import {
-  buildTradeReviewWindow,
+  buildSymbolTradesReviewWindow,
   calculateTradeValueUsd,
+  collectExecutionsForSymbol,
+  collectTradesForSymbol,
   findNearestBarIndex,
-  resolveTradeReviewTimeframe
+  normalizeInstrumentKey,
+  resolveTradeReviewTimeframe,
+  staggerMarkerPrice
 } from '@/utils/tradeReview'
 import { timestampMillisecondsUtc } from '@/utils/utcInstant'
 import { formatBacktestTime } from '@/utils/userTime'
@@ -385,8 +392,14 @@ export default {
         }
       })).reverse()
     },
-    tradeRows () { return this.result.closedTrades || this.result.trades || [] },
-    executionRows () { return this.result.executions || this.result.rawTrades || [] },
+    tradeRows () {
+      const rows = [...(this.result.closedTrades || this.result.trades || [])]
+      return rows.sort((a, b) => this.compareTradeTimeDesc(a, b))
+    },
+    executionRows () {
+      const rows = [...(this.result.executions || this.result.rawTrades || [])]
+      return rows.sort((a, b) => this.compareExecutionTimeDesc(a, b))
+    },
     reviewInstrument () {
       const raw = String(this.selectedTrade.symbol || '')
       const colon = raw.indexOf(':')
@@ -399,12 +412,31 @@ export default {
       return { market, symbol, exchangeId: parts.length > 1 ? parts[0] : '', marketType: parts.length > 1 ? parts[1] : (parts[0] || 'spot') }
     },
     reviewTimeframe () {
+      const trades = this.reviewSymbolTrades
+      const spanTrade = trades.length
+        ? {
+          entry_time: trades[0].entry_time,
+          exit_time: trades[trades.length - 1].exit_time || trades[trades.length - 1].entry_time
+        }
+        : this.selectedTrade
       return resolveTradeReviewTimeframe(
-        this.selectedTrade,
+        spanTrade,
         (this.result.manifest && this.result.manifest.primaryFrequency) || '1d'
       )
     },
-    reviewWindow () { return buildTradeReviewWindow(this.selectedTrade, this.reviewTimeframe) },
+    reviewSymbolTrades () {
+      return collectTradesForSymbol(this.tradeRows, this.selectedTrade && this.selectedTrade.symbol)
+    },
+    reviewSymbolExecutions () {
+      return collectExecutionsForSymbol(this.executionRows, this.selectedTrade && this.selectedTrade.symbol)
+    },
+    reviewWindow () {
+      return buildSymbolTradesReviewWindow(
+        this.reviewSymbolTrades,
+        this.reviewTimeframe,
+        this.reviewSymbolExecutions
+      )
+    },
     rebalanceColumns () {
       return [
         { title: this.$t('strategyV2.backtest.time'), dataIndex: 'time', width: 170, customRender: this.formatDate },
@@ -493,6 +525,27 @@ export default {
     if (this.chart) this.chart.dispose()
   },
   methods: {
+    tradeTimeMs (row, keys) {
+      if (!row) return 0
+      for (const key of keys) {
+        const raw = row[key]
+        if (raw === undefined || raw === null || raw === '') continue
+        const ms = Date.parse(String(raw))
+        if (Number.isFinite(ms)) return ms
+      }
+      return 0
+    },
+    compareTradeTimeDesc (a, b) {
+      const tb = this.tradeTimeMs(b, ['exit_time', 'exitTime', 'entry_time', 'entryTime', 'time'])
+      const ta = this.tradeTimeMs(a, ['exit_time', 'exitTime', 'entry_time', 'entryTime', 'time'])
+      if (tb !== ta) return tb - ta
+      return this.tradeTimeMs(b, ['entry_time', 'entryTime']) - this.tradeTimeMs(a, ['entry_time', 'entryTime'])
+    },
+    compareExecutionTimeDesc (a, b) {
+      const tb = this.tradeTimeMs(b, ['time', 'fill_time', 'fillTime', 'signal_time', 'signalTime'])
+      const ta = this.tradeTimeMs(a, ['time', 'fill_time', 'fillTime', 'signal_time', 'signalTime'])
+      return tb - ta
+    },
     renderChart () {
       const curve = this.result.equityCurve || []
       if (!this.$refs.chart || !curve.length) return
@@ -563,35 +616,128 @@ export default {
       this.reviewMarkerTimer = setTimeout(() => {
         const component = this.$refs.reviewChart
         const chart = component && component.getChartInstance ? component.getChartInstance() : null
-        const trade = this.selectedTrade || {}
-        const entryTime = this.reviewWindow.entryTime
-        const exitTime = this.reviewWindow.exitTime
-        const entryPrice = Number(trade.entry_price)
-        const exitPrice = Number(trade.exit_price)
-        if (!component || !chart || !Number.isFinite(entryTime) || !Number.isFinite(exitTime)) return
+        const windowSpan = this.reviewWindow
+        const executions = this.reviewSymbolExecutions
+        const trades = this.reviewSymbolTrades
+        if (!component || !chart) return
+        if (!Number.isFinite(windowSpan.entryTime) || !Number.isFinite(windowSpan.exitTime)) return
 
         component.clearBacktestOverlays()
+        if (executions.length) {
+          this.renderExecutionMarkers(component, executions)
+        } else {
+          this.renderClosedTradeMarkers(component, trades)
+        }
+        this.focusReviewRange(chart, windowSpan.entryTime, windowSpan.exitTime)
+      }, 80)
+    },
+    renderExecutionMarkers (component, executions) {
+      const selected = this.selectedTrade || {}
+      const selectedStart = timestampMillisecondsUtc(selected.entry_time)
+      const selectedEnd = timestampMillisecondsUtc(selected.exit_time)
+      const buckets = {}
+      executions.forEach((execution, index) => {
+        const timestamp = timestampMillisecondsUtc(execution.time || execution.fill_time || execution.signal_time)
+        const key = String(timestamp)
+        if (!buckets[key]) buckets[key] = []
+        buckets[key].push({ execution, index, timestamp })
+      })
+      let buyNo = 0
+      let sellNo = 0
+      executions.forEach((execution, index) => {
+        const timestamp = timestampMillisecondsUtc(execution.time || execution.fill_time || execution.signal_time)
+        const price = Number(execution.price)
+        if (!Number.isFinite(timestamp) || !Number.isFinite(price)) return
+        const sideRaw = String(execution.side || '').toLowerCase()
+        const isBuy = sideRaw === 'buy' || sideRaw === 'long' || sideRaw === 'cover'
+        if (isBuy) buyNo += 1
+        else sellNo += 1
+        const n = isBuy ? buyNo : sellNo
+        const bucket = buckets[String(timestamp)] || []
+        const bucketIndex = bucket.findIndex(item => item.index === index)
+        const displayPrice = staggerMarkerPrice(price, Math.max(0, bucketIndex), bucket.length)
+        const inSelected = Number.isFinite(selectedStart) && Number.isFinite(selectedEnd)
+          && timestamp >= selectedStart - 1 && timestamp <= selectedEnd + 1
+        component.addBacktestOverlay(this.reviewMarkerConfig({
+          timestamp,
+          price: displayPrice,
+          text: inSelected
+            ? (isBuy
+              ? this.$t('strategyV2.backtest.buyMarkerSelected', { n })
+              : this.$t('strategyV2.backtest.sellMarkerSelected', { n }))
+            : (isBuy
+              ? this.$t('strategyV2.backtest.buyMarkerN', { n })
+              : this.$t('strategyV2.backtest.sellMarkerN', { n })),
+          side: isBuy ? 'buy' : 'sell',
+          color: isBuy ? '#f6465d' : '#0ecb81'
+        }))
+      })
+    },
+    renderClosedTradeMarkers (component, trades) {
+      const selectedKey = this.tradeIdentity(this.selectedTrade)
+      const entryBuckets = {}
+      const exitBuckets = {}
+      trades.forEach((trade, index) => {
+        const entryTime = timestampMillisecondsUtc(trade.entry_time)
+        const exitTime = timestampMillisecondsUtc(trade.exit_time)
+        if (Number.isFinite(entryTime)) {
+          const key = String(entryTime)
+          if (!entryBuckets[key]) entryBuckets[key] = []
+          entryBuckets[key].push(index)
+        }
+        if (Number.isFinite(exitTime)) {
+          const key = String(exitTime)
+          if (!exitBuckets[key]) exitBuckets[key] = []
+          exitBuckets[key].push(index)
+        }
+      })
+      trades.forEach((trade, index) => {
+        const isSelected = this.tradeIdentity(trade) === selectedKey
         const isShort = String(trade.side || '').toLowerCase() === 'short'
-        if (Number.isFinite(entryPrice)) {
+        const round = index + 1
+        const entryTime = timestampMillisecondsUtc(trade.entry_time)
+        const exitTime = timestampMillisecondsUtc(trade.exit_time)
+        const entryPrice = Number(trade.entry_price)
+        const exitPrice = Number(trade.exit_price)
+        if (Number.isFinite(entryTime) && Number.isFinite(entryPrice)) {
+          const bucket = entryBuckets[String(entryTime)] || [index]
+          const bucketIndex = bucket.indexOf(index)
           component.addBacktestOverlay(this.reviewMarkerConfig({
             timestamp: entryTime,
-            price: entryPrice,
-            text: this.$t('strategyV2.backtest.entryMarker'),
+            price: staggerMarkerPrice(entryPrice, bucketIndex, bucket.length),
+            text: isSelected
+              ? this.$t('strategyV2.backtest.entryMarkerSelected', { n: round })
+              : this.$t('strategyV2.backtest.entryMarkerN', { n: round }),
             side: isShort ? 'sell' : 'buy',
             color: isShort ? '#0ecb81' : '#f6465d'
           }))
         }
-        if (Number.isFinite(exitPrice)) {
+        if (Number.isFinite(exitTime) && Number.isFinite(exitPrice)) {
+          const bucket = exitBuckets[String(exitTime)] || [index]
+          const bucketIndex = bucket.indexOf(index)
           component.addBacktestOverlay(this.reviewMarkerConfig({
             timestamp: exitTime,
-            price: exitPrice,
-            text: this.$t('strategyV2.backtest.exitMarker'),
+            price: staggerMarkerPrice(exitPrice, bucketIndex, bucket.length),
+            text: isSelected
+              ? this.$t('strategyV2.backtest.exitMarkerSelected', { n: round })
+              : this.$t('strategyV2.backtest.exitMarkerN', { n: round }),
             side: isShort ? 'buy' : 'sell',
             color: isShort ? '#f6465d' : '#0ecb81'
           }))
         }
-        this.focusReviewRange(chart, entryTime, exitTime)
-      }, 80)
+      })
+    },
+    tradeIdentity (trade) {
+      if (!trade) return ''
+      return [
+        normalizeInstrumentKey(trade.symbol),
+        trade.entry_time,
+        trade.exit_time,
+        trade.entry_price,
+        trade.exit_price,
+        trade.quantity,
+        trade.profit
+      ].map(item => String(item == null ? '' : item)).join('|')
     },
     reviewMarkerConfig ({ timestamp, price, text, side, color }) {
       return {
@@ -711,8 +857,9 @@ export default {
 .audit-summary span { color: #7c8ca1; font-size: 11px; }
 .clickable-table /deep/ tbody tr { cursor: pointer; }
 .clickable-table /deep/ tbody tr:hover td { background: rgba(82, 196, 26, .08) !important; }
-.review-summary { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px; border-radius: 8px; background: #f8fafc; }
+.review-summary { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px; border-radius: 8px; background: #f8fafc; flex-wrap: wrap; }
 .review-summary b { margin-left: auto; }
+.review-summary-hint { color: #64748b; font-size: 12px; font-style: normal; }
 .review-chart-shell { width: 100%; height: 68vh; min-height: 520px; max-height: 680px; overflow: hidden; }
 .review-chart-shell /deep/ .chart-left { width: 100% !important; height: 100% !important; }
 .review-chart-shell /deep/ .kline-chart-container { height: auto !important; min-height: 0; }
