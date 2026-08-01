@@ -244,7 +244,7 @@ import { mapState } from 'vuex'
 import { listExchangeCredentials } from '@/api/credentials'
 import { getNotificationSettings } from '@/api/user'
 import { formatExchangeCredentialLabel, getExchangeDisplayName } from '@/utils/exchangeCredential'
-import { extractScriptParamsFromCode } from '@/views/strategy-ide/components/scriptTemplateCatalog'
+import { extractScriptParamsFromCode, strategyParamLabelKey } from '@/views/strategy-ide/components/scriptTemplateCatalog'
 
 const DEFAULT_CHANNELS = ['browser', 'email']
 const CRYPTO_EXCHANGES = ['binance', 'bitget', 'bybit', 'okx', 'gate', 'htx']
@@ -640,8 +640,17 @@ export default {
         : 'strategyCenter.editor.ctaStrategy')
     },
     parameterLabel (param) {
-      const key = `trading-assistant.templateParam.${param.name}.label`
-      return this.$te && this.$te(key) ? this.$t(key) : String(param.name || '').replace(/_/g, ' ')
+      const candidates = [
+        param && (param.labelKey || param.label_key),
+        strategyParamLabelKey(param && param.name),
+        param && param.name ? `trading-assistant.templateParam.${param.name}.label` : ''
+      ].filter(Boolean)
+      for (const key of candidates) {
+        if (this.$te && !this.$te(key)) continue
+        const label = this.$t(key)
+        if (label && label !== key) return label
+      }
+      return String((param && param.name) || '').replace(/_/g, ' ')
     },
     buildParameterValues (values) {
       const result = {}

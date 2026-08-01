@@ -48,6 +48,19 @@ function escapeForRegExp (value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** snake_case / kebab-case → camelCase for strategyV2.params.* keys */
+export function snakeToCamelParamName (name) {
+  return String(name || '')
+    .trim()
+    .replace(/[-_]+([a-zA-Z0-9])/g, (_, ch) => String(ch).toUpperCase())
+}
+
+/** Canonical i18n key used by Strategy API V2 templates. */
+export function strategyParamLabelKey (name) {
+  const camel = snakeToCamelParamName(name)
+  return camel ? `strategyV2.params.${camel}` : ''
+}
+
 export function normalizePercentParamValue (raw) {
   const n = Number(raw)
   if (!Number.isFinite(n)) return null
@@ -217,10 +230,12 @@ export function extractScriptParamsFromCode (code) {
       seen.add(name)
       const parsed = parsePythonLiteral(match[2])
       const type = inferParamType(name, parsed)
+      const labelKey = strategyParamLabelKey(name)
       params.push({
         name,
         source: 'code_param',
         type,
+        ...(labelKey ? { labelKey } : {}),
         ...inferParamDefaults(name, parsed, type),
         ...parseParamKeywordOptions(match[3], type)
       })
@@ -265,10 +280,12 @@ export function extractScriptParamsFromCode (code) {
             ? (isPercentParamName(name, parsed) ? 'percent' : 'number')
             : 'text'
       const range = parseDeclaredRange(desc, type)
+      const labelKey = strategyParamLabelKey(name)
       params.push({
         name,
         type,
         source: 'indicator_param',
+        ...(labelKey ? { labelKey } : {}),
         ...inferParamDefaults(name, parsed, type),
         ...range
       })
@@ -402,9 +419,11 @@ export function buildScriptCodeWithParamValues (code, params = [], overrides = {
       : String(codeValue)
     const strategyPattern = new RegExp(`(^\\s*#\\s*@strategy\\s+${escapeForRegExp(param.name)}\\s*:?\\s+)(\\S+)(.*$)`, 'im')
     next = next.replace(strategyPattern, `$1${strategyLiteral}$3`)
-    const getPattern = new RegExp(`(params\\.get\\(\\s*['"]${escapeForRegExp(param.name)}['"]\\s*,\\s*)([^\\)\\n]+)(\\))`, 'g')
+    // Default expr must not contain '(' / ')' — nested params.get(...) would
+    // otherwise match the first ')' and leave a stray closing paren.
+    const getPattern = new RegExp(`(params\\.get\\(\\s*['"]${escapeForRegExp(param.name)}['"]\\s*,\\s*)([^\\)\\n(]+)(\\))`, 'g')
     next = next.replace(getPattern, `$1${literal}$3`)
-    const contextGetPattern = new RegExp(`(context\\.params\\.get\\(\\s*['"]${escapeForRegExp(param.name)}['"]\\s*,\\s*)([^\\)\\n]+)(\\))`, 'g')
+    const contextGetPattern = new RegExp(`(context\\.params\\.get\\(\\s*['"]${escapeForRegExp(param.name)}['"]\\s*,\\s*)([^\\)\\n(]+)(\\))`, 'g')
     return next.replace(contextGetPattern, `$1${literal}$3`)
   }, String(code || ''))
 }

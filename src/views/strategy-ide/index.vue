@@ -431,6 +431,7 @@ import {
   updateScriptSource,
   verifyStrategyCode
 } from '@/api/strategy'
+import { extractScriptParamsFromCode } from './components/scriptTemplateCatalog'
 
 const DEFAULT_SCRIPT_CODE = `"""
 My Custom Strategy
@@ -588,6 +589,10 @@ export default {
       const metadata = this.parseObject(source.metadata)
       const metaSchema = this.parseObject(metadata.param_schema)
       if (Array.isArray(metaSchema.params) && metaSchema.params.length) return metaSchema
+      const inferred = extractScriptParamsFromCode(this.scriptCode || (source && source.code) || '')
+      if (inferred && Array.isArray(inferred.params) && inferred.params.length) {
+        return { params: inferred.params }
+      }
       return direct
     },
     allScriptOptions () {

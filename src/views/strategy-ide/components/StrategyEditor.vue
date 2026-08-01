@@ -371,7 +371,8 @@ import {
   buildTemplateCode,
   buildTemplateParamValues,
   extractScriptParamsFromCode,
-  buildScriptCodeWithParamValues
+  buildScriptCodeWithParamValues,
+  strategyParamLabelKey
 } from './scriptTemplateCatalog'
 import { getScriptTemplateList } from '@/api/strategy'
 
@@ -871,6 +872,7 @@ def handle_data(context, data):
       if (!inferred) {
         this.inferredParamTemplate = null
         this.templateParamValues = {}
+        this.emitTemplateParams()
         return
       }
       const nextValues = buildTemplateParamValues(inferred)
@@ -884,17 +886,19 @@ def handle_data(context, data):
       this.inferredParamTemplate = inferred
       this.templateParamValues = nextValues
       this.activeTab = 'params'
+      this.emitTemplateParams()
     },
 
     getParamLabel (param) {
-      const directKey = param && (param.labelKey || param.label_key)
-      if (directKey) {
-        const directValue = this.$t(directKey)
-        if (directValue !== directKey) return directValue
+      const candidates = [
+        param && (param.labelKey || param.label_key),
+        strategyParamLabelKey(param && param.name),
+        param && param.name ? `trading-assistant.templateParam.${param.name}.label` : ''
+      ].filter(Boolean)
+      for (const key of candidates) {
+        const value = this.$t(key)
+        if (value && value !== key) return value
       }
-      const key = `trading-assistant.templateParam.${param.name}.label`
-      const value = this.$t(key)
-      if (value !== key) return value
       if (param && param.label) return param.label
       return param.name
     },

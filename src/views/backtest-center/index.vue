@@ -311,7 +311,7 @@
               />
             </span>
           </span>
-          <span class="run-card__meta">{{ item.market }} · {{ item.timeframe }} · {{ formatDate(item.created_at) }}</span>
+          <span class="run-card__meta">{{ item.market }} · {{ item.timeframe }} · {{ formatHistoryPeriod(item) }} · {{ formatDate(item.created_at) }}</span>
           <template v-if="mode === 'factor'">
             <span class="run-card__status status-complete">{{ factorLabel(item.factor_id) }} · {{ item.groups_count }}Q · {{ item.holding_period }}{{ $t('strategyV2.factorResearch.bars') }}</span>
             <span class="run-card__metrics factor-history-metrics">
@@ -359,6 +359,7 @@ import {
   startBacktestRunSession,
   stopBacktestRunSession
 } from '@/services/backtestRunSession'
+import { extractScriptParamsFromCode, strategyParamLabelKey } from '@/views/strategy-ide/components/scriptTemplateCatalog'
 import PortfolioResult from './PortfolioResult.vue'
 import FactorResearchResult from './FactorResearchResult.vue'
 
@@ -511,7 +512,11 @@ export default {
     },
     paramDefinitions () {
       const schema = this.parseObject(this.source && this.source.param_schema)
-      return Array.isArray(schema.params) ? schema.params : []
+      if (Array.isArray(schema.params) && schema.params.length) return schema.params
+      // Legacy / incomplete saves may store empty param_schema while # @param
+      // still exists in source code — parse it so the run panel stays usable.
+      const inferred = extractScriptParamsFromCode(this.source && this.source.code)
+      return (inferred && Array.isArray(inferred.params)) ? inferred.params : []
     },
     metrics () {
       if (!this.result) return []
@@ -609,21 +614,23 @@ export default {
     },
     mode (value) {
       this.handleModeChange(value)
+    },
+    '$route.query.sourceId' (value, previous) {
+      if (String(value || '') === String(previous || '')) return
+      this.syncSourceFromRoute({ forceReload: Boolean(value) })
     }
   },
   async mounted () {
-    await this.refreshPage()
-    const routeSourceId = Number(this.$route.query.sourceId)
-    const sourceId = routeSourceId || (this.sources[0] && Number(this.sources[0].id))
-    if (sourceId) {
-      this.form.sourceId = sourceId
-      await this.selectSource(sourceId)
-    }
+    await this.syncSourceFromRoute({ forceReload: true })
     window.addEventListener('resize', this.resizeEquityChart)
     await this.attachBacktestSession()
   },
-  activated () {
-    this.attachBacktestSession()
+  async activated () {
+    // keep-alive re-entry does not remount; reload list and honor ?sourceId=
+    // so strategy IDE → backtest always shows the just-saved script.
+    const hasRouteSource = Boolean(this.$route.query.sourceId)
+    await this.syncSourceFromRoute({ forceReload: hasRouteSource })
+    await this.attachBacktestSession()
     this.$nextTick(() => this.resizeEquityChart())
   },
   beforeDestroy () {
@@ -728,6 +735,28 @@ export default {
     async refreshPage () {
       await Promise.all([this.loadSources(), this.loadHistory()])
     },
+    async syncSourceFromRoute ({ forceReload = false } = {}) {
+      await this.refreshPage()
+      const routeSourceId = Number(this.$route.query.sourceId)
+      const currentId = Number(this.form.sourceId)
+      const fallbackId = this.availableSources[0] ? Number(this.availableSources[0].id) : null
+      let nextId = routeSourceId || currentId || fallbackId
+      if (nextId && !this.availableSources.some(item => Number(item.id) === Number(nextId))) {
+        nextId = fallbackId
+      }
+      if (!nextId) {
+        this.form.sourceId = null
+        this.source = null
+        this.manifest = null
+        this.backtestRangePolicy = null
+        return
+      }
+      const changed = Number(this.form.sourceId) !== Number(nextId)
+      this.form.sourceId = Number(nextId)
+      if (changed || forceReload || !this.manifest) {
+        await this.selectSource(nextId)
+      }
+    },
     async loadSources () {
       const response = await getScriptSourceList()
       this.sources = (response.data && response.data.items) || []
@@ -791,9 +820,15 @@ export default {
       return [item.symbol, marketTypeLabel].filter(Boolean).join(' · ')
     },
     parameterLabel (item) {
-      if (!item.labelKey) return item.name
-      const label = this.$t(item.labelKey)
-      return label === item.labelKey ? item.name : label
+      const candidates = [
+        item && (item.labelKey || item.label_key),
+        strategyParamLabelKey(item && item.name)
+      ].filter(Boolean)
+      for (const key of candidates) {
+        const label = this.$t(key)
+        if (label && label !== key) return label
+      }
+      return (item && item.name) || ''
     },
     setParam (name, value) {
       this.params = { ...this.params, [name]: value }
@@ -1170,6 +1205,17 @@ export default {
     },
     formatDate (value) {
       return formatBacktestTime(value, { locale: this.$i18n.locale, fallback: '-' })
+    },
+    formatHistoryDay (value) {
+      if (!value) return ''
+      const parsed = moment(value)
+      return parsed.isValid() ? parsed.format('YYYY-MM-DD') : String(value).slice(0, 10)
+    },
+    formatHistoryPeriod (item) {
+      const start = this.formatHistoryDay(item && (item.start_date || item.startDate))
+      const end = this.formatHistoryDay(item && (item.end_date || item.endDate))
+      if (start && end) return `${start} ~ ${end}`
+      return start || end || '-'
     },
     historyStatusLabel (item) {
       return this.$t(`strategyV2.backtest.status.${item.result_status || 'unknown'}`)
