@@ -98,13 +98,39 @@
           <a-tag color="blue">运行中</a-tag>
           <span class="status-meta">任务 {{ runningJob.id }} · {{ runningJob.scenario || form.scenario }} · step {{ runningJob.step_n || form.step_n }}</span>
         </template>
-        <span v-else class="status-meta">当前无运行中任务</span>
+        <template v-else-if="lastJob">
+          <a-tag :color="lastJobTag.color">{{ lastJobTag.text }}</a-tag>
+          <span class="status-meta">
+            最近任务 {{ lastJob.id }}
+            · {{ lastJob.scenario || '-' }}
+            · step {{ lastJob.step_n != null ? lastJob.step_n : '-' }}
+            · 退出码 {{ lastJob.exit_code != null ? lastJob.exit_code : '-' }}
+          </span>
+        </template>
+        <span v-else class="status-meta">尚无任务记录</span>
       </div>
+
+      <a-alert
+        v-if="lastJobBanner.show"
+        :type="lastJobBanner.type"
+        show-icon
+        :message="lastJobBanner.message"
+        :description="lastJobBanner.description"
+        style="margin-top: 12px"
+      />
 
       <div class="log-panel">
         <div class="log-header">
           <strong>日志尾部</strong>
           <a-tag v-if="runningJob" color="processing">每 3 秒刷新</a-tag>
+          <a-button
+            v-if="logJobId"
+            size="small"
+            type="link"
+            @click="loadLogs(logJobId)"
+          >
+            刷新日志
+          </a-button>
         </div>
         <pre class="log-pre">{{ logText || '暂无日志' }}</pre>
       </div>
@@ -230,7 +256,10 @@ export default {
       importResult: null,
       statusData: null,
       runningJob: null,
+      lastJob: null,
+      previousRunningJobId: null,
       logText: '',
+      logJobId: null,
       sessions: [],
       dataSources: [],
       form: {
@@ -281,6 +310,57 @@ export default {
         return { color: 'default', text: 'LLM 使用 workspace .env' }
       }
       return { color: 'default', text: 'LLM 同步状态未知' }
+    },
+    lastJobTag () {
+      const status = String((this.lastJob && this.lastJob.status) || '').toLowerCase()
+      if (status === 'succeeded' || status === 'completed') return { color: 'green', text: '最近任务成功' }
+      if (status === 'failed') return { color: 'red', text: '最近任务失败' }
+      if (status === 'stopped') return { color: 'orange', text: '最近任务已停止' }
+      return { color: 'default', text: status ? `最近任务 ${status}` : '最近任务' }
+    },
+    lastJobBanner () {
+      if (this.runningJob || !this.lastJob) return { show: false }
+      const status = String(this.lastJob.status || '').toLowerCase()
+      const id = this.lastJob.id || '-'
+      const sessionHint = this.newestSessionId
+      if (status === 'succeeded' || status === 'completed') {
+        return {
+          show: true,
+          type: this.logLooksRateLimited ? 'warning' : 'success',
+          message: this.logLooksRateLimited
+            ? `任务 ${id} 进程已结束（退出码 ${this.lastJob.exit_code}），但日志出现 LLM 额度/限流错误`
+            : `任务 ${id} 已成功结束`,
+          description: sessionHint
+            ? `会话 ${sessionHint}。请打开 RD UI（19899）核对因子/回测；若要进策略，在下方导入分数。`
+            : '请刷新历史会话，并打开 RD UI（19899）核对产出；确认有分数后再导入。'
+        }
+      }
+      if (status === 'failed') {
+        return {
+          show: true,
+          type: 'error',
+          message: `任务 ${id} 失败（退出码 ${this.lastJob.exit_code != null ? this.lastJob.exit_code : '-'}）`,
+          description: this.logLooksRateLimited
+            ? '日志含余额不足/429，请先给 QD 所用 LLM 充值或换模型后再启动。'
+            : '请查看下方日志尾部定位错误。'
+        }
+      }
+      if (status === 'stopped') {
+        return {
+          show: true,
+          type: 'warning',
+          message: `任务 ${id} 已手动停止`,
+          description: '可重新启动；未完成会话通常没有可导入分数。'
+        }
+      }
+      return { show: false }
+    },
+    newestSessionId () {
+      return this.sessions && this.sessions.length ? this.sessions[0].id : ''
+    },
+    logLooksRateLimited () {
+      const text = this.logText || ''
+      return /429|RateLimit|余额不足|无可用资源包/.test(text)
     },
     sessionRowSelection () {
       return {
@@ -344,6 +424,7 @@ export default {
           this.bridgeOffline = true
           this.statusData = null
           this.runningJob = null
+          this.lastJob = null
           this.logText = ''
           this.stopPolling()
           return
@@ -351,17 +432,40 @@ export default {
         this.bridgeOffline = false
         this.statusData = this.unwrap(res) || {}
         const running = Array.isArray(this.statusData.running_jobs) ? this.statusData.running_jobs : []
-        this.runningJob = running.length ? running[0] : null
+        const nextRunning = running.length ? running[0] : null
+        this.lastJob = this.statusData.last_job || null
+
+        // 从运行中变为结束：弹一次明确结果
+        if (this.previousRunningJobId && !nextRunning) {
+          const done = this.lastJob && this.lastJob.id === this.previousRunningJobId
+            ? this.lastJob
+            : this.lastJob
+          const status = String((done && done.status) || '').toLowerCase()
+          if (status === 'succeeded' || status === 'completed') {
+            this.$message.success(`挖掘任务已结束：成功（${done.id}）`)
+          } else if (status === 'failed') {
+            this.$message.error(`挖掘任务已结束：失败（${done && done.id ? done.id : this.previousRunningJobId}）`)
+          } else if (status === 'stopped') {
+            this.$message.warning(`挖掘任务已停止（${done && done.id ? done.id : this.previousRunningJobId}）`)
+          } else {
+            this.$message.info('挖掘任务已结束，请查看最近任务状态')
+          }
+          await this.loadSessions()
+        }
+        this.previousRunningJobId = nextRunning ? nextRunning.id : null
+        this.runningJob = nextRunning
         this.syncPolling()
-        if (this.runningJob) {
-          await this.loadLogs(this.runningJob.id)
-        } else {
-          this.logText = ''
+
+        const jobForLogs = this.runningJob || this.lastJob
+        if (jobForLogs && jobForLogs.id) {
+          this.logJobId = jobForLogs.id
+          await this.loadLogs(jobForLogs.id)
         }
       } catch (error) {
         this.bridgeOffline = true
         this.statusData = null
         this.runningJob = null
+        this.lastJob = null
         this.logText = ''
         this.stopPolling()
       }
