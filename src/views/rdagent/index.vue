@@ -93,6 +93,7 @@
           Bridge {{ bridgeConnected ? '已连接' : '未连接' }}
         </a-tag>
         <a-tag v-if="statusData.workspace_exists === false" color="orange">工作区不存在</a-tag>
+        <a-tag v-if="llmSyncTag.color" :color="llmSyncTag.color">{{ llmSyncTag.text }}</a-tag>
         <template v-if="runningJob">
           <a-tag color="blue">运行中</a-tag>
           <span class="status-meta">任务 {{ runningJob.id }} · {{ runningJob.scenario || form.scenario }} · step {{ runningJob.step_n || form.step_n }}</span>
@@ -266,6 +267,20 @@ export default {
         { id: 'default', label: '官方 cn_data（约至 2020）', exists: true },
         { id: 'quantmind', label: 'QuantMInd（至 2026-05）', exists: true }
       ]
+    },
+    llmSyncTag () {
+      const sync = (this.statusData && this.statusData.llm_sync) || {}
+      if (!this.bridgeConnected) return {}
+      if (sync.applied && sync.chat_model) {
+        return { color: 'green', text: `LLM 已同步 QD · ${sync.provider || ''} · ${sync.chat_model}` }
+      }
+      if (sync.enabled && sync.error) {
+        return { color: 'orange', text: `LLM 同步失败 · ${sync.error}` }
+      }
+      if (sync.enabled === false) {
+        return { color: 'default', text: 'LLM 使用 workspace .env' }
+      }
+      return { color: 'default', text: 'LLM 同步状态未知' }
     },
     sessionRowSelection () {
       return {

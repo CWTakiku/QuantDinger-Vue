@@ -28,6 +28,10 @@ export function fetchRdagentDataSources () {
   return request({ url: '/api/rdagent/data-sources', method: 'get' })
 }
 
+export function fetchRdagentLlmSync () {
+  return request({ url: '/api/rdagent/llm-sync', method: 'get' })
+}
+
 export function startRdagentUi () {
   return request({ url: '/api/rdagent/ui/start', method: 'post' })
 }
