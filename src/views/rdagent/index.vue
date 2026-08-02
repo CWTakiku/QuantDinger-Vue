@@ -41,6 +41,23 @@
             </a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item label="数据源">
+          <a-select
+            v-model="form.data_source"
+            :disabled="!!runningJob || bridgeOffline"
+            style="width: 280px"
+            :loading="dataSourcesLoading"
+          >
+            <a-select-option
+              v-for="item in dataSourceOptions"
+              :key="item.id"
+              :value="item.id"
+              :disabled="item.exists === false"
+            >
+              {{ item.label }}{{ item.calendar_end ? ` · 至 ${item.calendar_end}` : '' }}{{ item.active ? ' · 当前' : '' }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="步数 step_n">
           <a-input-number
             v-model="form.step_n"
@@ -189,6 +206,7 @@ import {
   fetchRdagentJobLogs,
   fetchRdagentSessions,
   importFromSession,
+  fetchRdagentDataSources,
   startRdagentJob,
   startRdagentUi,
   stopRdagentJob
@@ -206,14 +224,17 @@ export default {
       starting: false,
       stopping: false,
       sessionsLoading: false,
+      dataSourcesLoading: false,
       importing: false,
       importResult: null,
       statusData: null,
       runningJob: null,
       logText: '',
       sessions: [],
+      dataSources: [],
       form: {
         scenario: 'fin_factor',
+        data_source: 'quantmind',
         step_n: 1
       },
       importForm: {
@@ -239,6 +260,13 @@ export default {
     ...mapState({ navTheme: state => state.app.theme }),
     isDarkTheme () { return ['dark', 'realdark'].includes(this.navTheme) },
     bridgeConnected () { return !this.bridgeOffline && this.statusData && this.statusData.ok !== false },
+    dataSourceOptions () {
+      if (this.dataSources.length) return this.dataSources
+      return [
+        { id: 'default', label: '官方 cn_data（约至 2020）', exists: true },
+        { id: 'quantmind', label: 'QuantMInd（至 2026-05）', exists: true }
+      ]
+    },
     sessionRowSelection () {
       return {
         type: 'radio',
@@ -266,9 +294,32 @@ export default {
     async refreshAll () {
       this.refreshing = true
       try {
-        await Promise.all([this.loadStatus(), this.loadSessions()])
+        await Promise.all([this.loadStatus(), this.loadSessions(), this.loadDataSources()])
       } finally {
         this.refreshing = false
+      }
+    },
+    async loadDataSources () {
+      this.dataSourcesLoading = true
+      try {
+        const res = await fetchRdagentDataSources()
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        const list = this.unwrap(res) || []
+        this.dataSources = Array.isArray(list) ? list : []
+        const active = this.dataSources.find(d => d.active && d.exists !== false)
+        const preferred = this.dataSources.find(d => d.id === 'quantmind' && d.exists !== false)
+        if (active) {
+          this.form.data_source = active.id
+        } else if (preferred) {
+          this.form.data_source = preferred.id
+        } else if (this.dataSources.length && !this.dataSources.some(d => d.id === this.form.data_source && d.exists !== false)) {
+          const firstOk = this.dataSources.find(d => d.exists !== false)
+          if (firstOk) this.form.data_source = firstOk.id
+        }
+      } catch (error) {
+        // keep fallback options
+      } finally {
+        this.dataSourcesLoading = false
       }
     },
     async loadStatus () {
@@ -347,7 +398,8 @@ export default {
       try {
         const res = await startRdagentJob({
           scenario: this.form.scenario,
-          step_n: this.form.step_n
+          step_n: this.form.step_n,
+          data_source: this.form.data_source || 'default'
         })
         if (!this.isSuccess(res)) throw new Error(res && res.msg)
         this.$message.success('任务已启动')

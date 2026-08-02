@@ -24,6 +24,10 @@ export function fetchRdagentSessions () {
   return request({ url: '/api/rdagent/sessions', method: 'get' })
 }
 
+export function fetchRdagentDataSources () {
+  return request({ url: '/api/rdagent/data-sources', method: 'get' })
+}
+
 export function startRdagentUi () {
   return request({ url: '/api/rdagent/ui/start', method: 'post' })
 }
