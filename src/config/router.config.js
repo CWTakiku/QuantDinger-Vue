@@ -61,6 +61,12 @@ export const asyncRouterMap = [
         component: () => import('@/views/universe-manager'),
         meta: { title: 'menu.dashboard.universeManager', keepAlive: true, icon: 'database', permission: ['dashboard'] }
       },
+      {
+        path: '/rdagent',
+        name: 'RdAgentLab',
+        component: () => import('@/views/rdagent'),
+        meta: { title: 'menu.dashboard.rdagent', keepAlive: false, icon: 'experiment', permission: ['admin'] }
+      },
       // Broker accounts.
       {
         path: '/broker-accounts',
