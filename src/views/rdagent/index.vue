@@ -104,7 +104,80 @@
         :columns="sessionColumns"
         :data-source="sessions"
         :pagination="{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }"
+        :row-selection="sessionRowSelection"
       />
+    </section>
+
+    <section class="workspace-card import-card">
+      <h2 class="section-title">导入分数</h2>
+      <p class="import-hint">从所选会话导出预测分数并写入 External Alpha 库，供策略回测与实盘使用。</p>
+      <a-form layout="vertical" class="import-form">
+        <a-row :gutter="16">
+          <a-col :xs="24" :md="12">
+            <a-form-item label="会话 ID">
+              <a-select
+                v-model="importForm.session_id"
+                show-search
+                allow-clear
+                placeholder="选择或搜索会话"
+                :disabled="bridgeOffline"
+                option-filter-prop="children"
+              >
+                <a-select-option v-for="item in sessions" :key="item.id" :value="item.id">
+                  {{ item.id }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="6">
+            <a-form-item label="source">
+              <a-input v-model="importForm.source" :disabled="bridgeOffline" />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="6">
+            <a-form-item label="version">
+              <a-input
+                v-model="importForm.version"
+                placeholder="留空则 session_&lt;id&gt;"
+                :disabled="bridgeOffline"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="6">
+            <a-form-item label="universe">
+              <a-input v-model="importForm.universe" :disabled="bridgeOffline" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item>
+          <a-button
+            type="primary"
+            icon="import"
+            :loading="importing"
+            :disabled="!importForm.session_id || bridgeOffline"
+            @click="handleImport"
+          >
+            导入到 External Alpha
+          </a-button>
+        </a-form-item>
+      </a-form>
+
+      <a-alert
+        v-if="importResult"
+        type="success"
+        show-icon
+        class="import-result"
+      >
+        <template slot="message">
+          已入库 {{ importResult.inserted != null ? importResult.inserted : importResult.parsed_rows }} 行
+          · source={{ importResult.source }} · version={{ importResult.version }}
+        </template>
+        <template slot="description">
+          可在
+          <router-link to="/strategy-center">策略中心</router-link>
+          创建或回测策略时引用上述 source/version 作为外部 Alpha 信号。
+        </template>
+      </a-alert>
     </section>
   </div>
 </template>
@@ -115,6 +188,7 @@ import {
   fetchRdagentStatus,
   fetchRdagentJobLogs,
   fetchRdagentSessions,
+  importFromSession,
   startRdagentJob,
   startRdagentUi,
   stopRdagentJob
@@ -132,6 +206,8 @@ export default {
       starting: false,
       stopping: false,
       sessionsLoading: false,
+      importing: false,
+      importResult: null,
       statusData: null,
       runningJob: null,
       logText: '',
@@ -140,6 +216,13 @@ export default {
         scenario: 'fin_factor',
         step_n: 1
       },
+      importForm: {
+        session_id: undefined,
+        source: 'rdagent',
+        version: '',
+        universe: 'csi300'
+      },
+      selectedSessionKeys: [],
       scenarios: [
         { value: 'fin_factor', label: 'fin_factor（因子挖掘）' },
         { value: 'fin_quant', label: 'fin_quant（量化研究）' }
@@ -155,7 +238,17 @@ export default {
   computed: {
     ...mapState({ navTheme: state => state.app.theme }),
     isDarkTheme () { return ['dark', 'realdark'].includes(this.navTheme) },
-    bridgeConnected () { return !this.bridgeOffline && this.statusData && this.statusData.ok !== false }
+    bridgeConnected () { return !this.bridgeOffline && this.statusData && this.statusData.ok !== false },
+    sessionRowSelection () {
+      return {
+        type: 'radio',
+        selectedRowKeys: this.selectedSessionKeys,
+        onChange: (keys) => {
+          this.selectedSessionKeys = keys
+          this.importForm.session_id = keys.length ? keys[0] : undefined
+        }
+      }
+    }
   },
   mounted () {
     this.refreshAll()
@@ -286,6 +379,35 @@ export default {
         // 即使启动接口失败也尝试打开本地 UI
       }
       window.open(UI_URL, '_blank')
+    },
+    async handleImport () {
+      if (!this.importForm.session_id) {
+        this.$message.warning('请先选择会话')
+        return
+      }
+      this.importing = true
+      this.importResult = null
+      try {
+        const payload = {
+          session_id: this.importForm.session_id,
+          source: this.importForm.source || 'rdagent',
+          universe: this.importForm.universe || 'csi300'
+        }
+        if (this.importForm.version && String(this.importForm.version).trim()) {
+          payload.version = String(this.importForm.version).trim()
+        }
+        const res = await importFromSession(payload)
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.importResult = this.unwrap(res) || {}
+        const inserted = this.importResult.inserted != null
+          ? this.importResult.inserted
+          : this.importResult.parsed_rows
+        this.$message.success(`已导入 ${inserted || 0} 行分数`)
+      } catch (error) {
+        this.$message.error(error.backendMessage || error.message || '导入失败')
+      } finally {
+        this.importing = false
+      }
     }
   }
 }
@@ -407,6 +529,20 @@ export default {
 .theme-dark .log-header {
   background: #1d1d1d;
   border-color: #303030;
+}
+.import-hint {
+  margin: -6px 0 14px;
+  color: #667085;
+  font-size: 13px;
+}
+.import-form {
+  max-width: 960px;
+}
+.import-result {
+  margin-top: 12px;
+}
+.theme-dark .import-hint {
+  color: #a7a7a7;
 }
 @media (max-width: 760px) {
   .rdagent-page {

@@ -27,3 +27,7 @@ export function fetchRdagentSessions () {
 export function startRdagentUi () {
   return request({ url: '/api/rdagent/ui/start', method: 'post' })
 }
+
+export function importFromSession (data) {
+  return request({ url: '/api/rdagent/import-from-session', method: 'post', data })
+}
