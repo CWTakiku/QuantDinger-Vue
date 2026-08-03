@@ -149,8 +149,36 @@
         :data-source="sessions"
         :pagination="{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }"
         :row-selection="sessionRowSelection"
-      />
+      >
+        <template slot="sessionAction" slot-scope="text, record">
+          <a-button
+            type="link"
+            size="small"
+            @click="openSessionDetail(record)"
+          >
+            查看详情
+          </a-button>
+          <a-button
+            type="danger"
+            size="small"
+            ghost
+            icon="delete"
+            :disabled="bridgeOffline || deletingSessionId === record.id"
+            :loading="deletingSessionId === record.id"
+            @click="confirmDeleteSession(record)"
+          >
+            删除
+          </a-button>
+        </template>
+      </a-table>
     </section>
+
+    <session-detail
+      v-if="selectedDetailSessionId"
+      :session-id="selectedDetailSessionId"
+      @import="fillImportFromDetail"
+      @close="selectedDetailSessionId = ''"
+    />
 
     <section class="workspace-card import-card">
       <h2 class="section-title">导入分数</h2>
@@ -232,6 +260,7 @@ import {
   fetchRdagentStatus,
   fetchRdagentJobLogs,
   fetchRdagentSessions,
+  deleteRdagentSession,
   importFromSession,
   fetchRdagentDataSources,
   startRdagentJob,
@@ -239,11 +268,13 @@ import {
   stopRdagentJob
 } from '@/api/rdagent'
 import { createVisibilityPolling } from '@/utils/visibilityPolling'
+import SessionDetail from './SessionDetail.vue'
 
 const UI_URL = 'http://127.0.0.1:19899'
 
 export default {
   name: 'RdAgentLab',
+  components: { SessionDetail },
   data () {
     return {
       bridgeOffline: false,
@@ -251,6 +282,8 @@ export default {
       starting: false,
       stopping: false,
       sessionsLoading: false,
+      deletingSessionId: '',
+      selectedDetailSessionId: '',
       dataSourcesLoading: false,
       importing: false,
       importResult: null,
@@ -281,7 +314,13 @@ export default {
       sessionColumns: [
         { title: '会话 ID', dataIndex: 'id', key: 'id' },
         { title: '更新时间', dataIndex: 'mtime', key: 'mtime', width: 220 },
-        { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true }
+        { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true },
+        {
+          title: '操作',
+          key: 'action',
+          width: 180,
+          scopedSlots: { customRender: 'sessionAction' }
+        }
       ],
       poller: null
     }
@@ -482,6 +521,38 @@ export default {
         this.sessionsLoading = false
       }
     },
+    confirmDeleteSession (record) {
+      if (!record || !record.id) return
+      this.$confirm({
+        title: '删除会话',
+        content: `确定删除会话 ${record.id}？目录将从磁盘移除，且不可恢复。`,
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => this.deleteSession(record.id)
+      })
+    },
+    async deleteSession (sessionId) {
+      this.deletingSessionId = sessionId
+      try {
+        const res = await deleteRdagentSession(sessionId)
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.$message.success(`已删除会话 ${sessionId}`)
+        if (this.importForm.session_id === sessionId) {
+          this.importForm.session_id = undefined
+        }
+        if (this.selectedDetailSessionId === sessionId) {
+          this.selectedDetailSessionId = ''
+        }
+        this.selectedSessionKeys = this.selectedSessionKeys.filter(id => id !== sessionId)
+        await this.loadSessions()
+      } catch (error) {
+        this.$message.error(error.backendMessage || error.message || '删除会话失败')
+        throw error
+      } finally {
+        this.deletingSessionId = ''
+      }
+    },
     async loadLogs (jobId) {
       if (!jobId) return
       try {
@@ -550,6 +621,18 @@ export default {
         // 即使启动接口失败也尝试打开本地 UI
       }
       window.open(UI_URL, '_blank')
+    },
+    openSessionDetail (record) {
+      if (!record || !record.id) return
+      this.selectedDetailSessionId = record.id
+      this.selectedSessionKeys = [record.id]
+      this.importForm.session_id = record.id
+    },
+    fillImportFromDetail (sessionId) {
+      if (!sessionId) return
+      this.importForm.session_id = sessionId
+      this.selectedSessionKeys = [sessionId]
+      this.$message.success(`已填入导入会话 ${sessionId}`)
     },
     async handleImport () {
       if (!this.importForm.session_id) {
