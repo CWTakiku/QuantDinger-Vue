@@ -47,6 +47,7 @@
             :disabled="!!runningJob || bridgeOffline"
             style="width: 280px"
             :loading="dataSourcesLoading"
+            @change="onDataSourceChange"
           >
             <a-select-option
               v-for="item in dataSourceOptions"
@@ -57,6 +58,26 @@
               {{ item.label }}{{ item.calendar_end ? ` · 至 ${item.calendar_end}` : '' }}{{ item.active ? ' · 当前' : '' }}
             </a-select-option>
           </a-select>
+        </a-form-item>
+        <a-form-item label="开始日期">
+          <a-date-picker
+            v-model="form.start_date"
+            value-format="YYYY-MM-DD"
+            :disabled="!!runningJob || bridgeOffline"
+            placeholder="可选"
+            style="width: 140px"
+            @change="onDatesTouched"
+          />
+        </a-form-item>
+        <a-form-item label="结束日期">
+          <a-date-picker
+            v-model="form.end_date"
+            value-format="YYYY-MM-DD"
+            :disabled="!!runningJob || bridgeOffline"
+            placeholder="可选"
+            style="width: 140px"
+            @change="onDatesTouched"
+          />
         </a-form-item>
         <a-form-item label="步数 step_n">
           <a-input-number
@@ -87,6 +108,9 @@
           </a-button>
         </a-form-item>
       </a-form>
+      <p class="date-hint">
+        日期留空则使用 RD 模板默认区间；填写后按 60% / 15% / 25% 自动切分训练、验证、回测（总跨度至少 3 年）。
+      </p>
 
       <div v-if="statusData" class="status-row">
         <a-tag :color="bridgeConnected ? 'green' : 'red'">
@@ -295,9 +319,12 @@ export default {
       logJobId: null,
       sessions: [],
       dataSources: [],
+      datesTouched: false,
       form: {
         scenario: 'fin_factor',
         data_source: 'quantmind',
+        start_date: undefined,
+        end_date: undefined,
         step_n: 1
       },
       importForm: {
@@ -450,11 +477,25 @@ export default {
           const firstOk = this.dataSources.find(d => d.exists !== false)
           if (firstOk) this.form.data_source = firstOk.id
         }
+        this.applyCalendarDefaults(this.form.data_source)
       } catch (error) {
         // keep fallback options
       } finally {
         this.dataSourcesLoading = false
       }
+    },
+    onDatesTouched () {
+      this.datesTouched = true
+    },
+    onDataSourceChange (id) {
+      this.applyCalendarDefaults(id)
+    },
+    applyCalendarDefaults (dataSourceId) {
+      if (this.datesTouched) return
+      const item = (this.dataSources || []).find(d => d.id === dataSourceId)
+      if (!item) return
+      this.form.start_date = item.calendar_start || undefined
+      this.form.end_date = item.calendar_end || undefined
     },
     async loadStatus () {
       try {
@@ -586,11 +627,14 @@ export default {
     async handleStart () {
       this.starting = true
       try {
-        const res = await startRdagentJob({
+        const payload = {
           scenario: this.form.scenario,
           step_n: this.form.step_n,
           data_source: this.form.data_source || 'default'
-        })
+        }
+        if (this.form.start_date) payload.start_date = this.form.start_date
+        if (this.form.end_date) payload.end_date = this.form.end_date
+        const res = await startRdagentJob(payload)
         if (!this.isSuccess(res)) throw new Error(res && res.msg)
         this.$message.success('任务已启动')
         await this.loadStatus()
