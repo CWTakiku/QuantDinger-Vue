@@ -770,6 +770,12 @@ export default {
 .job-form {
   margin-bottom: 14px;
 }
+.date-hint {
+  margin: 0 0 12px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .status-row {
   display: flex;
   flex-wrap: wrap;
