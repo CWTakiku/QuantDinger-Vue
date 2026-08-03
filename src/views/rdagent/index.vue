@@ -79,9 +79,9 @@
             @change="onDatesTouched"
           />
         </a-form-item>
-        <a-form-item label="步数 step_n">
+        <a-form-item label="循环轮数">
           <a-input-number
-            v-model="form.step_n"
+            v-model="form.loop_n"
             :min="1"
             :max="20"
             :disabled="!!runningJob || bridgeOffline"
@@ -110,6 +110,7 @@
       </a-form>
       <p class="date-hint">
         日期留空则使用 RD 模板默认区间；填写后按 60% / 15% / 25% 自动切分训练、验证、回测（总跨度至少 3 年）。
+        循环轮数表示完整研究轮次（每轮含假设→编码→回测→反馈）；不是内部 step 数。
       </p>
 
       <div v-if="statusData" class="status-row">
@@ -120,14 +121,14 @@
         <a-tag v-if="llmSyncTag.color" :color="llmSyncTag.color">{{ llmSyncTag.text }}</a-tag>
         <template v-if="runningJob">
           <a-tag color="blue">运行中</a-tag>
-          <span class="status-meta">任务 {{ runningJob.id }} · {{ runningJob.scenario || form.scenario }} · step {{ runningJob.step_n || form.step_n }}</span>
+          <span class="status-meta">任务 {{ runningJob.id }} · {{ runningJob.scenario || form.scenario }} · {{ runningJob.loop_n || form.loop_n }} 轮</span>
         </template>
         <template v-else-if="lastJob">
           <a-tag :color="lastJobTag.color">{{ lastJobTag.text }}</a-tag>
           <span class="status-meta">
             最近任务 {{ lastJob.id }}
             · {{ lastJob.scenario || '-' }}
-            · step {{ lastJob.step_n != null ? lastJob.step_n : '-' }}
+            · {{ lastJob.loop_n != null ? lastJob.loop_n : '-' }} 轮
             · 退出码 {{ lastJob.exit_code != null ? lastJob.exit_code : '-' }}
           </span>
         </template>
@@ -325,7 +326,7 @@ export default {
         data_source: 'quantmind',
         start_date: undefined,
         end_date: undefined,
-        step_n: 1
+        loop_n: 1
       },
       importForm: {
         session_id: undefined,
@@ -629,7 +630,7 @@ export default {
       try {
         const payload = {
           scenario: this.form.scenario,
-          step_n: this.form.step_n,
+          loop_n: this.form.loop_n,
           data_source: this.form.data_source || 'default'
         }
         if (this.form.start_date) payload.start_date = this.form.start_date

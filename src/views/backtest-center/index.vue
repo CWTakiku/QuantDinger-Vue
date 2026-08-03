@@ -69,10 +69,20 @@
           <a-form layout="vertical">
             <div class="form-grid">
               <a-form-item :label="$t('backtest-center.startDate')">
-                <a-date-picker v-model="form.startDate" :disabled-date="disabledStartDate" class="full-width" />
+                <a-date-picker
+                  v-model="form.startDate"
+                  :disabled-date="disabledStartDate"
+                  class="full-width"
+                  @change="onStartDateChange"
+                />
               </a-form-item>
               <a-form-item :label="$t('backtest-center.endDate')">
-                <a-date-picker v-model="form.endDate" :disabled-date="disabledEndDate" class="full-width" />
+                <a-date-picker
+                  v-model="form.endDate"
+                  :disabled-date="disabledEndDate"
+                  class="full-width"
+                  @change="onEndDateChange"
+                />
               </a-form-item>
               <a-form-item v-if="mode === 'portfolio'" :label="$t('backtest-center.initialCapital')">
                 <a-input-number v-model="form.initialCapital" :min="10" class="full-width" />
@@ -834,6 +844,7 @@ export default {
       this.params = { ...this.params, [name]: value }
     },
     disabledStartDate (current) {
+      // Start is anchored to the current end date and max span.
       if (!current || !this.form.endDate) return false
       const endDate = this.form.endDate.clone().startOf('day')
       if (current.isAfter(endDate, 'day')) return true
@@ -841,14 +852,27 @@ export default {
       return current.isBefore(endDate.clone().subtract(this.backtestRangeLimitDays, 'days'), 'day')
     },
     disabledEndDate (current) {
-      if (!current || !this.form.startDate) return false
-      const startDate = this.form.startDate.clone().startOf('day')
-      if (current.isBefore(startDate, 'day')) return true
-      if (this.backtestRangeLimitDays === null) return false
-      return current.isAfter(startDate.clone().add(this.backtestRangeLimitDays, 'days'), 'day')
+      // Do NOT lock end behind the current start — that made historical windows
+      // unreachable (couldn't move end to 2020 while start was still 2025).
+      // Span is enforced by clamping start after the end date changes.
+      if (!current) return false
+      return false
+    },
+    onEndDateChange () {
+      this.applyBacktestRangePolicy()
+    },
+    onStartDateChange () {
+      if (!this.form.startDate || !this.form.endDate) return
+      if (this.form.startDate.isAfter(this.form.endDate, 'day')) {
+        this.form.endDate = this.form.startDate.clone().startOf('day')
+      }
+      this.applyBacktestRangePolicy()
     },
     applyBacktestRangePolicy () {
       if (this.backtestRangeLimitDays === null || !this.form.startDate || !this.form.endDate) return
+      if (this.form.startDate.isAfter(this.form.endDate, 'day')) {
+        this.form.startDate = this.form.endDate.clone().startOf('day')
+      }
       if (this.selectedRangeDays <= this.backtestRangeLimitDays && this.selectedRangeDays >= 0) return
       this.form.startDate = this.form.endDate.clone().startOf('day').subtract(this.backtestRangeLimitDays, 'days')
       this.$message.info(this.$t('strategyV2.backtest.rangeLimitAdjusted', {
