@@ -125,14 +125,53 @@
                     :checked="Boolean(params[item.name])"
                     @change="value => setParam(item.name, value)"
                   />
+                  <a-select
+                    v-else-if="isExternalAlphaPanelParam(item)"
+                    :value="params[item.name]"
+                    show-search
+                    allow-clear
+                    option-filter-prop="children"
+                    class="full-width"
+                    :placeholder="externalAlphaParamPlaceholder(item)"
+                    :not-found-content="externalAlphaPanelsLoading ? undefined : $t('strategyV2.params.alphaVersionEmpty')"
+                    @change="value => onExternalAlphaParamChange(item.name, value)"
+                  >
+                    <a-select-option
+                      v-for="option in externalAlphaParamOptions(item.name)"
+                      :key="option.value"
+                      :value="option.value"
+                    >
+                      {{ option.label }}
+                    </a-select-option>
+                  </a-select>
+                  <a-select
+                    v-else-if="item.type === 'select'"
+                    :value="params[item.name]"
+                    class="full-width"
+                    @change="value => setParam(item.name, value)"
+                  >
+                    <a-select-option
+                      v-for="option in (item.options || [])"
+                      :key="String(option.value != null ? option.value : option)"
+                      :value="option.value != null ? option.value : option"
+                    >
+                      {{ option.label || option.value || option }}
+                    </a-select-option>
+                  </a-select>
                   <a-input-number
-                    v-else
+                    v-else-if="['integer', 'number', 'percent'].includes(item.type)"
                     :value="params[item.name]"
                     :min="item.min"
                     :max="item.max"
                     :step="item.step || 1"
                     class="full-width"
                     @change="value => setParam(item.name, value)"
+                  />
+                  <a-input
+                    v-else
+                    :value="params[item.name]"
+                    class="full-width"
+                    @change="event => setParam(item.name, event && event.target ? event.target.value : event)"
                   />
                 </a-form-item>
               </div>
@@ -353,12 +392,13 @@ import {
   compileScriptSource,
   getScriptSourceDetail,
   getScriptSourceList,
-  getStrategyFactorResearchHistory,
-  getStrategyFactorResearchRun,
-  deleteStrategyFactorResearchRun,
   getStrategyBacktestHistory,
   getStrategyBacktestRun,
   deleteStrategyBacktestRun,
+  getStrategyFactorResearchHistory,
+  getStrategyFactorResearchRun,
+  deleteStrategyFactorResearchRun,
+  listExternalAlphaPanels,
   runStrategyFactorResearch,
   runStrategyBacktest
 } from '@/api/strategy'
@@ -386,6 +426,8 @@ export default {
       manifest: null,
       backtestRangePolicy: null,
       params: {},
+      externalAlphaPanels: [],
+      externalAlphaPanelsLoading: false,
       result: null,
       factorResult: null,
       selectedRun: null,
@@ -505,7 +547,29 @@ export default {
       })
     },
     runDisabled () {
-      return !this.manifest || this.backtestRangeExceeded || (this.mode === 'factor' && !this.factorCompatible)
+      if (!this.manifest || this.backtestRangeExceeded || (this.mode === 'factor' && !this.factorCompatible)) {
+        return true
+      }
+      if (this.usesExternalAlphaParams && !String(this.params.version || '').trim()) {
+        return true
+      }
+      return false
+    },
+    usesExternalAlphaParams () {
+      const names = new Set(this.paramDefinitions.map(item => item && item.name).filter(Boolean))
+      return names.has('source') && names.has('version')
+    },
+    externalAlphaSources () {
+      const values = this.externalAlphaPanels.map(item => String(item.source || '').trim()).filter(Boolean)
+      return Array.from(new Set(values)).sort()
+    },
+    externalAlphaVersions () {
+      const source = String(this.params.source || '').trim()
+      const values = this.externalAlphaPanels
+        .filter(item => !source || String(item.source || '') === source)
+        .map(item => String(item.version || '').trim())
+        .filter(Boolean)
+      return Array.from(new Set(values))
     },
     strategyTypeLabel () {
       const type = String((this.manifest && this.manifest.strategyType) || 'cta')
@@ -818,6 +882,7 @@ export default {
         output[item.name] = item.default
         return output
       }, {})
+      await this.loadExternalAlphaPanels()
     },
     sourceTypeLabel (item) {
       if (String(item.template_key || '').startsWith('robot_v2_')) return this.$t('strategyV2.robot')
@@ -842,6 +907,72 @@ export default {
     },
     setParam (name, value) {
       this.params = { ...this.params, [name]: value }
+    },
+    isExternalAlphaPanelParam (item) {
+      if (!this.usesExternalAlphaParams || !item) return false
+      return item.name === 'source' || item.name === 'version'
+    },
+    externalAlphaParamOptions (name) {
+      if (name === 'source') {
+        return this.externalAlphaSources.map(value => ({ value, label: value }))
+      }
+      if (name === 'version') {
+        const source = String(this.params.source || '').trim()
+        return this.externalAlphaPanels
+          .filter(item => !source || String(item.source || '') === source)
+          .map(item => {
+            const value = String(item.version || '').trim()
+            const max = item.as_of_max ? String(item.as_of_max).slice(0, 10) : ''
+            const label = max ? `${value} · ≤${max}` : value
+            return { value, label }
+          })
+          .filter(item => item.value)
+      }
+      return []
+    },
+    externalAlphaParamPlaceholder (item) {
+      if (item && item.name === 'version') {
+        return this.$t('strategyV2.params.alphaVersionPlaceholder')
+      }
+      return this.$t('strategyV2.params.alphaSourcePlaceholder')
+    },
+    onExternalAlphaParamChange (name, value) {
+      this.setParam(name, value == null ? '' : value)
+      if (name === 'source') {
+        const versions = this.externalAlphaVersions
+        if (!versions.includes(String(this.params.version || '').trim())) {
+          this.setParam('version', versions[0] || '')
+        }
+      }
+    },
+    ensureExternalAlphaSelection () {
+      if (!this.usesExternalAlphaParams) return
+      const sources = this.externalAlphaSources
+      if (sources.length && !sources.includes(String(this.params.source || '').trim())) {
+        this.setParam('source', sources[0])
+      }
+      const versions = this.externalAlphaVersions
+      if (versions.length && !versions.includes(String(this.params.version || '').trim())) {
+        this.setParam('version', versions[0])
+      }
+    },
+    async loadExternalAlphaPanels () {
+      if (!this.usesExternalAlphaParams) {
+        this.externalAlphaPanels = []
+        return
+      }
+      this.externalAlphaPanelsLoading = true
+      try {
+        const response = await listExternalAlphaPanels()
+        const data = (response && response.data) || {}
+        this.externalAlphaPanels = Array.isArray(data.panels) ? data.panels : []
+        this.ensureExternalAlphaSelection()
+      } catch (error) {
+        this.externalAlphaPanels = []
+        this.$message.warning(this.$t('strategyV2.params.alphaPanelsLoadFailed'))
+      } finally {
+        this.externalAlphaPanelsLoading = false
+      }
     },
     disabledStartDate (current) {
       // Start is anchored to the current end date and max span.

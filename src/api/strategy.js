@@ -32,6 +32,7 @@ const api = {
   strategyBacktestHistory: '/api/backtest/history',
   strategyBacktestGet: '/api/backtest/get',
   strategyBacktestDelete: '/api/backtest/delete',
+  externalAlphaPanels: '/api/backtest/external-alpha/panels',
   scriptSources: '/api/strategies/script-sources',
   scriptSourceDetail: '/api/strategies/script-sources/detail',
   createScriptSource: '/api/strategies/script-sources/create',
@@ -346,6 +347,14 @@ export function getStrategyBacktestRun (runId) {
     url: api.strategyBacktestGet,
     method: 'get',
     params: { runId }
+  })
+}
+
+export function listExternalAlphaPanels (params = {}) {
+  return request({
+    url: api.externalAlphaPanels,
+    method: 'get',
+    params
   })
 }
 

@@ -59,6 +59,24 @@
             </a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item label="标的池">
+          <a-select
+            v-model="form.universe_code"
+            :disabled="!!runningJob || bridgeOffline"
+            style="width: 260px"
+            :loading="universesLoading"
+            show-search
+            option-filter-prop="children"
+          >
+            <a-select-option
+              v-for="item in universeOptions"
+              :key="item.code"
+              :value="item.code"
+            >
+              {{ item.name || item.code }}{{ item.benchmark_hint ? ` · 基准 ${item.benchmark_hint}` : '' }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="开始日期">
           <a-date-picker
             v-model="form.start_date"
@@ -110,6 +128,7 @@
       </a-form>
       <p class="date-hint">
         日期留空则使用 RD 模板默认区间；填写后按 60% / 15% / 25% 自动切分训练、验证、回测（总跨度至少 3 年）。
+        标的池来自 QuantDinger（CNStock）；全市场基准中证全指，指数池用对应指数，手动/自选池用成分等权。
         循环轮数表示完整研究轮次（每轮含假设→编码→回测→反馈）；不是内部 step 数。
       </p>
 
@@ -207,7 +226,7 @@
 
     <section class="workspace-card import-card">
       <h2 class="section-title">导入分数</h2>
-      <p class="import-hint">从所选会话导出预测分数并写入 External Alpha 库，供策略回测与实盘使用。</p>
+      <p class="import-hint">从所选会话导出预测分数并写入 External Alpha 库，供策略回测与实盘使用。不选 Loop = 最新预测产物。</p>
       <a-form layout="vertical" class="import-form">
         <a-row :gutter="16">
           <a-col :xs="24" :md="12">
@@ -222,6 +241,26 @@
               >
                 <a-select-option v-for="item in sessions" :key="item.id" :value="item.id">
                   {{ item.id }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="6">
+            <a-form-item label="Loop">
+              <a-select
+                v-model="importForm.loop_index"
+                allow-clear
+                placeholder="不选 = 最新预测产物"
+                :disabled="bridgeOffline || !importForm.session_id"
+                :loading="importLoopsLoading"
+                @change="onImportLoopChange"
+              >
+                <a-select-option
+                  v-for="loop in exportableLoops"
+                  :key="loop.loop_index"
+                  :value="loop.loop_index"
+                >
+                  {{ importLoopOptionLabel(loop) }}
                 </a-select-option>
               </a-select>
             </a-form-item>
@@ -287,7 +326,9 @@ import {
   fetchRdagentSessions,
   deleteRdagentSession,
   importFromSession,
+  fetchSessionDetail,
   fetchRdagentDataSources,
+  fetchRdagentUniverses,
   startRdagentJob,
   startRdagentUi,
   stopRdagentJob
@@ -310,7 +351,10 @@ export default {
       deletingSessionId: '',
       selectedDetailSessionId: '',
       dataSourcesLoading: false,
+      universesLoading: false,
       importing: false,
+      importLoopsLoading: false,
+      exportableLoops: [],
       importResult: null,
       statusData: null,
       runningJob: null,
@@ -320,16 +364,19 @@ export default {
       logJobId: null,
       sessions: [],
       dataSources: [],
+      universes: [],
       datesTouched: false,
       form: {
         scenario: 'fin_factor',
         data_source: 'quantmind',
+        universe_code: 'csi300',
         start_date: undefined,
         end_date: undefined,
         loop_n: 1
       },
       importForm: {
         session_id: undefined,
+        loop_index: undefined,
         source: 'rdagent',
         version: '',
         universe: 'csi300'
@@ -362,6 +409,14 @@ export default {
       return [
         { id: 'default', label: '官方 cn_data（约至 2020）', exists: true },
         { id: 'quantmind', label: 'QuantMInd（至 2026-05）', exists: true }
+      ]
+    },
+    universeOptions () {
+      if (this.universes.length) return this.universes
+      return [
+        { code: '__all_market__', name: '全市场', benchmark_hint: 'SZ000985' },
+        { code: 'csi300', name: '沪深300', benchmark_hint: 'SH000300' },
+        { code: 'csi500', name: '中证500', benchmark_hint: 'SH000905' }
       ]
     },
     llmSyncTag () {
@@ -440,6 +495,12 @@ export default {
       }
     }
   },
+  watch: {
+    'importForm.session_id' (id, prev) {
+      if (id === prev) return
+      this.loadExportableLoops(id)
+    }
+  },
   mounted () {
     this.refreshAll()
   },
@@ -456,9 +517,31 @@ export default {
     async refreshAll () {
       this.refreshing = true
       try {
-        await Promise.all([this.loadStatus(), this.loadSessions(), this.loadDataSources()])
+        await Promise.all([
+          this.loadStatus(),
+          this.loadSessions(),
+          this.loadDataSources(),
+          this.loadUniverses()
+        ])
       } finally {
         this.refreshing = false
+      }
+    },
+    async loadUniverses () {
+      this.universesLoading = true
+      try {
+        const res = await fetchRdagentUniverses()
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        const list = this.unwrap(res) || []
+        this.universes = Array.isArray(list) ? list : []
+        if (!this.universes.some(u => u.code === this.form.universe_code)) {
+          const csi = this.universes.find(u => u.code === 'csi300')
+          this.form.universe_code = csi ? csi.code : (this.universes[0] && this.universes[0].code) || 'csi300'
+        }
+      } catch (error) {
+        this.universes = []
+      } finally {
+        this.universesLoading = false
       }
     },
     async loadDataSources () {
@@ -631,7 +714,8 @@ export default {
         const payload = {
           scenario: this.form.scenario,
           loop_n: this.form.loop_n,
-          data_source: this.form.data_source || 'default'
+          data_source: this.form.data_source || 'default',
+          universe_code: this.form.universe_code || 'csi300'
         }
         if (this.form.start_date) payload.start_date = this.form.start_date
         if (this.form.end_date) payload.end_date = this.form.end_date
@@ -679,6 +763,45 @@ export default {
       this.selectedSessionKeys = [sessionId]
       this.$message.success(`已填入导入会话 ${sessionId}`)
     },
+    importLoopOptionLabel (loop) {
+      if (!loop) return ''
+      const kind = loop.kind === 'model' ? '模型' : loop.kind === 'factor' ? '因子' : '因子'
+      const artifact = loop.artifact ? ` · ${loop.artifact}` : ''
+      return `Loop_${loop.loop_index} · ${kind}${artifact}`
+    },
+    async loadExportableLoops (sessionId) {
+      this.exportableLoops = []
+      this.importForm.loop_index = undefined
+      this.updateImportVersionFromLoop()
+      if (!sessionId) return
+      this.importLoopsLoading = true
+      try {
+        const res = await fetchSessionDetail(sessionId, 'summary')
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        const payload = this.unwrap(res) || {}
+        const loops = payload.exportable_loops ||
+          (payload.summary && payload.summary.exportable_loops) ||
+          []
+        this.exportableLoops = Array.isArray(loops) ? loops : []
+      } catch (error) {
+        this.exportableLoops = []
+        this.$message.warning(error.backendMessage || error.message || '加载可导出 Loop 失败')
+      } finally {
+        this.importLoopsLoading = false
+      }
+    },
+    onImportLoopChange () {
+      this.updateImportVersionFromLoop()
+    },
+    updateImportVersionFromLoop () {
+      const sid = this.importForm.session_id
+      const idx = this.importForm.loop_index
+      if (sid && idx != null && idx !== '') {
+        this.importForm.version = `session_${sid}_loop${idx}`
+      } else {
+        this.importForm.version = ''
+      }
+    },
     async handleImport () {
       if (!this.importForm.session_id) {
         this.$message.warning('请先选择会话')
@@ -694,6 +817,9 @@ export default {
         }
         if (this.importForm.version && String(this.importForm.version).trim()) {
           payload.version = String(this.importForm.version).trim()
+        }
+        if (this.importForm.loop_index != null && this.importForm.loop_index !== '') {
+          payload.loop_index = Number(this.importForm.loop_index)
         }
         const res = await importFromSession(payload)
         if (!this.isSuccess(res)) throw new Error(res && res.msg)

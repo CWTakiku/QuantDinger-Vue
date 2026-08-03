@@ -77,6 +77,21 @@
                   :checked="Boolean(model.templateParams[param.name])"
                   @change="value => setParameter(param.name, value)" />
                 <a-select
+                  v-else-if="isExternalAlphaPanelParam(param)"
+                  :value="model.templateParams[param.name]"
+                  show-search
+                  allow-clear
+                  option-filter-prop="children"
+                  :placeholder="externalAlphaParamPlaceholder(param)"
+                  @change="value => onExternalAlphaParamChange(param.name, value)">
+                  <a-select-option
+                    v-for="option in externalAlphaParamOptions(param.name)"
+                    :key="option.value"
+                    :value="option.value">
+                    {{ option.label }}
+                  </a-select-option>
+                </a-select>
+                <a-select
                   v-else-if="param.type === 'select' && Array.isArray(param.options)"
                   :value="model.templateParams[param.name]"
                   @change="value => setParameter(param.name, value)">
@@ -239,7 +254,7 @@
 </template>
 
 <script>
-import { compileScriptSource, createStrategy, getScriptSourceDetail, getScriptSourceList, getStrategyDetail, updateStrategy } from '@/api/strategy'
+import { compileScriptSource, createStrategy, getScriptSourceDetail, getScriptSourceList, getStrategyDetail, listExternalAlphaPanels, updateStrategy } from '@/api/strategy'
 import { mapState } from 'vuex'
 import { listExchangeCredentials } from '@/api/credentials'
 import { getNotificationSettings } from '@/api/user'
@@ -305,6 +320,7 @@ export default {
       originalStrategy: null,
       notificationSettings: {},
       notificationChannels: ['browser', 'email', 'telegram', 'discord', 'webhook', 'phone'],
+      externalAlphaPanels: [],
       model: this.defaultModel()
     }
   },
@@ -416,6 +432,22 @@ export default {
         type: Number.isInteger(this.sourceParameterValues[name]) ? 'integer' : (typeof this.sourceParameterValues[name] === 'number' ? 'number' : 'text'),
         default: this.sourceParameterValues[name]
       }))
+    },
+    usesExternalAlphaParams () {
+      const names = new Set(this.parameterDefinitions.map(item => item && item.name).filter(Boolean))
+      return names.has('source') && names.has('version')
+    },
+    externalAlphaSources () {
+      const values = this.externalAlphaPanels.map(item => String(item.source || '').trim()).filter(Boolean)
+      return Array.from(new Set(values)).sort()
+    },
+    externalAlphaVersions () {
+      const source = String((this.model.templateParams && this.model.templateParams.source) || '').trim()
+      const values = this.externalAlphaPanels
+        .filter(item => !source || String(item.source || '') === source)
+        .map(item => String(item.version || '').trim())
+        .filter(Boolean)
+      return Array.from(new Set(values))
     },
     compatibleCredentials () {
       return this.credentials.filter(credential => {
@@ -553,6 +585,7 @@ export default {
           this.model.leverage = 1
           this.normalizeExecutionFields()
         }
+        await this.loadExternalAlphaPanels()
       } catch (error) {
         if (String(this.model.scriptSourceId) === sourceId) this.sourceContractError = true
         throw error
@@ -662,6 +695,70 @@ export default {
     },
     setParameter (name, value) {
       this.$set(this.model.templateParams, name, value)
+    },
+    isExternalAlphaPanelParam (param) {
+      if (!this.usesExternalAlphaParams || !param) return false
+      return param.name === 'source' || param.name === 'version'
+    },
+    externalAlphaParamOptions (name) {
+      if (name === 'source') {
+        return this.externalAlphaSources.map(value => ({ value, label: value }))
+      }
+      if (name === 'version') {
+        const source = String((this.model.templateParams && this.model.templateParams.source) || '').trim()
+        return this.externalAlphaPanels
+          .filter(item => !source || String(item.source || '') === source)
+          .map(item => {
+            const value = String(item.version || '').trim()
+            const max = item.as_of_max ? String(item.as_of_max).slice(0, 10) : ''
+            const label = max ? `${value} · ≤${max}` : value
+            return { value, label }
+          })
+          .filter(item => item.value)
+      }
+      return []
+    },
+    externalAlphaParamPlaceholder (param) {
+      if (param && param.name === 'version') {
+        return this.$t('strategyV2.params.alphaVersionPlaceholder')
+      }
+      return this.$t('strategyV2.params.alphaSourcePlaceholder')
+    },
+    onExternalAlphaParamChange (name, value) {
+      this.setParameter(name, value == null ? '' : value)
+      if (name === 'source') {
+        const versions = this.externalAlphaVersions
+        if (!versions.includes(String((this.model.templateParams && this.model.templateParams.version) || '').trim())) {
+          this.setParameter('version', versions[0] || '')
+        }
+      }
+    },
+    ensureExternalAlphaSelection () {
+      if (!this.usesExternalAlphaParams) return
+      const sources = this.externalAlphaSources
+      const currentSource = String((this.model.templateParams && this.model.templateParams.source) || '').trim()
+      if (sources.length && !sources.includes(currentSource)) {
+        this.setParameter('source', sources[0])
+      }
+      const versions = this.externalAlphaVersions
+      const currentVersion = String((this.model.templateParams && this.model.templateParams.version) || '').trim()
+      if (versions.length && !versions.includes(currentVersion)) {
+        this.setParameter('version', versions[0])
+      }
+    },
+    async loadExternalAlphaPanels () {
+      if (!this.usesExternalAlphaParams) {
+        this.externalAlphaPanels = []
+        return
+      }
+      try {
+        const response = await listExternalAlphaPanels()
+        const data = (response && response.data) || {}
+        this.externalAlphaPanels = Array.isArray(data.panels) ? data.panels : []
+        this.ensureExternalAlphaSelection()
+      } catch (error) {
+        this.externalAlphaPanels = []
+      }
     },
     async next () {
       if (this.step === 0 && !this.model.scriptSourceId) {

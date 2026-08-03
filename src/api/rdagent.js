@@ -35,6 +35,10 @@ export function fetchRdagentDataSources () {
   return request({ url: '/api/rdagent/data-sources', method: 'get' })
 }
 
+export function fetchRdagentUniverses () {
+  return request({ url: '/api/rdagent/universes', method: 'get' })
+}
+
 export function fetchRdagentLlmSync () {
   return request({ url: '/api/rdagent/llm-sync', method: 'get' })
 }
@@ -67,5 +71,24 @@ export function downloadSessionMetricsCsv (id) {
     method: 'get',
     responseType: 'blob',
     timeout: 60000
+  })
+}
+
+export function fetchFactorMatrix (id, params) {
+  return request({
+    url: `/api/rdagent/sessions/${encodeURIComponent(id)}/factor-matrix`,
+    method: 'get',
+    params,
+    timeout: 60000
+  })
+}
+
+export function downloadFactorMatrixCsv (id, params) {
+  return request({
+    url: `/api/rdagent/sessions/${encodeURIComponent(id)}/factor-matrix.csv`,
+    method: 'get',
+    params,
+    responseType: 'blob',
+    timeout: 120000
   })
 }
