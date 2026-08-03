@@ -86,11 +86,11 @@
               <a-tab-pane key="research" tab="研究">
                 <template v-if="currentLoop">
                   <div class="kv">
-                    <label>Hypothesis</label>
+                    <label>假设</label>
                     <pre class="text-block">{{ (currentLoop.hypothesis && currentLoop.hypothesis.hypothesis) || '—' }}</pre>
                   </div>
                   <div class="kv">
-                    <label>Reason</label>
+                    <label>理由</label>
                     <pre class="text-block">{{ (currentLoop.hypothesis && currentLoop.hypothesis.reason) || '—' }}</pre>
                   </div>
                 </template>
@@ -174,9 +174,18 @@
                           </a-tag>
                         </div>
                         <pre class="text-block">{{ step.feedback || '—' }}</pre>
-                        <a-collapse v-if="step.code">
-                          <a-collapse-panel key="code" header="本轮代码">
-                            <pre class="code-block">{{ step.code }}</pre>
+                        <a-collapse v-if="step.code || step.prevCode">
+                          <a-collapse-panel key="code" :header="`evo_loop_${step.evo_loop} 代码对比`">
+                            <div class="evo-code-compare">
+                              <div class="evo-code-pane">
+                                <label>上一轮代码</label>
+                                <pre class="code-block">{{ step.prevCode || '（无上一轮）' }}</pre>
+                              </div>
+                              <div class="evo-code-pane">
+                                <label>本轮代码</label>
+                                <pre class="code-block">{{ step.code || '（无代码）' }}</pre>
+                              </div>
+                            </div>
                           </a-collapse-panel>
                         </a-collapse>
                       </a-timeline-item>
@@ -231,16 +240,16 @@ export default {
       metricsChart: null,
       equityChart: null,
       feedbackFields: [
-        { key: 'decision', label: 'Decision' },
-        { key: 'observations', label: 'Observations' },
-        { key: 'hypothesis_evaluation', label: 'Evaluation' },
-        { key: 'reason', label: 'Reason' },
-        { key: 'new_hypothesis', label: 'New Hypothesis' },
-        { key: 'exception', label: 'Exception' }
+        { key: 'decision', label: '决策' },
+        { key: 'observations', label: '观察' },
+        { key: 'hypothesis_evaluation', label: '评估' },
+        { key: 'reason', label: '理由' },
+        { key: 'new_hypothesis', label: '新假设' },
+        { key: 'exception', label: '异常' }
       ],
       metricColumns: [
         { title: '标签', dataIndex: 'label', key: 'label', width: 120, fixed: 'left' },
-        { title: 'Decision', dataIndex: 'decisionLabel', key: 'decision', width: 90 },
+        { title: '决策', dataIndex: 'decisionLabel', key: 'decision', width: 90 },
         { title: 'IC', dataIndex: 'ic', key: 'ic', customRender: v => this.fmt(v) },
         { title: 'ICIR', dataIndex: 'icir', key: 'icir', customRender: v => this.fmt(v) },
         { title: 'Rank IC', dataIndex: 'rank_ic', key: 'rank_ic', customRender: v => this.fmt(v) },
@@ -275,6 +284,7 @@ export default {
       const series = (this.detail && this.detail.metric_series) || []
       return series.map(row => ({
         ...row,
+        label: row.label === 'Alpha Base' ? '基线' : row.label,
         decisionLabel: row.loop_index == null && row.label === 'Alpha Base'
           ? '—'
           : this.formatDecision(row.decision)
@@ -298,7 +308,7 @@ export default {
       const baseline = (this.detail && this.detail.baseline) || {}
       const metrics = this.currentLoop.metrics || {}
       return [
-        { label: 'Baseline', ...this.pickMetrics(baseline) },
+        { label: '基线', ...this.pickMetrics(baseline) },
         { label: `Loop_${this.activeLoop}`, ...this.pickMetrics(metrics) }
       ]
     },
@@ -309,7 +319,14 @@ export default {
     evolutionGroups () {
       return this.currentFactors
         .map(factor => {
-          const steps = Array.isArray(factor.evolution) ? factor.evolution : []
+          const raw = Array.isArray(factor.evolution) ? factor.evolution : []
+          const steps = raw.map((step, idx) => {
+            const prev = idx > 0 ? raw[idx - 1] : null
+            return {
+              ...step,
+              prevCode: prev && prev.code ? prev.code : null
+            }
+          })
           return {
             name: factor.name,
             successMark: this.successMark(factor.coding_success),
@@ -464,17 +481,20 @@ export default {
     },
     onLoopChange () {
       this.activeFactorKey = undefined
-      if (this.loopTab === 'feedback') this.ensureEquity()
+      if (this.loopTab === 'feedback') this.refreshEquityChart()
       if (this.loopTab === 'evolution') this.ensureEvolution()
-      if (this.loopTab === 'dev' && this.codeLoaded) {
-        // code already merged for all loops when loaded once
-      }
-      this.$nextTick(this.renderEquityChart)
     },
     onLoopTabChange (key) {
       this.loopTab = key
-      if (key === 'feedback') this.ensureEquity()
+      if (key === 'feedback') this.refreshEquityChart()
       if (key === 'evolution') this.ensureEvolution()
+    },
+    async refreshEquityChart () {
+      await this.ensureEquity()
+      this.$nextTick(() => {
+        this.renderEquityChart()
+        this.resizeCharts()
+      })
     },
     async onFactorExpand (key) {
       this.activeFactorKey = key
@@ -497,7 +517,6 @@ export default {
       try {
         await this.load('loops,equity', { silent: true })
         this.equityLoaded = true
-        this.$nextTick(this.renderEquityChart)
       } finally {
         this.equityLoading = false
       }
@@ -564,7 +583,7 @@ export default {
       this.equityChart.setOption({
         animationDuration: 240,
         tooltip: { trigger: 'axis' },
-        legend: { data: ['account', 'bench'], textStyle: { color: text } },
+        legend: { data: ['账户净值', '基准'], textStyle: { color: text } },
         grid: { left: 48, right: 24, top: 40, bottom: 32 },
         xAxis: {
           type: 'category',
@@ -579,10 +598,13 @@ export default {
           splitLine: { lineStyle: { color: grid, type: 'dashed' } }
         },
         series: [
-          { name: 'account', type: 'line', data: curve.map(p => p.account), showSymbol: false },
-          { name: 'bench', type: 'line', data: curve.map(p => p.bench), showSymbol: false }
+          { name: '账户净值', type: 'line', data: curve.map(p => p.account), showSymbol: false },
+          { name: '基准', type: 'line', data: curve.map(p => p.bench), showSymbol: false }
         ]
       }, true)
+      this.$nextTick(() => {
+        if (this.equityChart) this.equityChart.resize()
+      })
     },
     resizeCharts () {
       if (this.metricsChart) this.metricsChart.resize()
@@ -735,12 +757,33 @@ export default {
   gap: 8px;
   margin-bottom: 4px;
 }
+.evo-code-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.evo-code-pane label {
+  display: block;
+  margin-bottom: 4px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 600;
+}
+.evo-code-pane .code-block {
+  max-height: 360px;
+}
+@media (max-width: 960px) {
+  .evo-code-compare {
+    grid-template-columns: 1fr;
+  }
+}
 .theme-dark.workspace-card {
   border-color: #2b2b2b;
   background: #151515;
 }
 .theme-dark .detail-meta,
 .theme-dark .kv label,
+.theme-dark .evo-code-pane label,
 .theme-dark .hyp-text {
   color: #a7a7a7;
 }
