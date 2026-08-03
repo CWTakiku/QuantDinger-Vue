@@ -41,9 +41,47 @@
             </a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="步数 step_n">
+        <a-form-item label="数据源">
+          <a-select
+            v-model="form.data_source"
+            :disabled="!!runningJob || bridgeOffline"
+            style="width: 280px"
+            :loading="dataSourcesLoading"
+            @change="onDataSourceChange"
+          >
+            <a-select-option
+              v-for="item in dataSourceOptions"
+              :key="item.id"
+              :value="item.id"
+              :disabled="item.exists === false"
+            >
+              {{ item.label }}{{ item.calendar_end ? ` · 至 ${item.calendar_end}` : '' }}{{ item.active ? ' · 当前' : '' }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="开始日期">
+          <a-date-picker
+            v-model="form.start_date"
+            value-format="YYYY-MM-DD"
+            :disabled="!!runningJob || bridgeOffline"
+            placeholder="可选"
+            style="width: 140px"
+            @change="onDatesTouched"
+          />
+        </a-form-item>
+        <a-form-item label="结束日期">
+          <a-date-picker
+            v-model="form.end_date"
+            value-format="YYYY-MM-DD"
+            :disabled="!!runningJob || bridgeOffline"
+            placeholder="可选"
+            style="width: 140px"
+            @change="onDatesTouched"
+          />
+        </a-form-item>
+        <a-form-item label="循环轮数">
           <a-input-number
-            v-model="form.step_n"
+            v-model="form.loop_n"
             :min="1"
             :max="20"
             :disabled="!!runningJob || bridgeOffline"
@@ -70,23 +108,54 @@
           </a-button>
         </a-form-item>
       </a-form>
+      <p class="date-hint">
+        日期留空则使用 RD 模板默认区间；填写后按 60% / 15% / 25% 自动切分训练、验证、回测（总跨度至少 3 年）。
+        循环轮数表示完整研究轮次（每轮含假设→编码→回测→反馈）；不是内部 step 数。
+      </p>
 
       <div v-if="statusData" class="status-row">
         <a-tag :color="bridgeConnected ? 'green' : 'red'">
           Bridge {{ bridgeConnected ? '已连接' : '未连接' }}
         </a-tag>
         <a-tag v-if="statusData.workspace_exists === false" color="orange">工作区不存在</a-tag>
+        <a-tag v-if="llmSyncTag.color" :color="llmSyncTag.color">{{ llmSyncTag.text }}</a-tag>
         <template v-if="runningJob">
           <a-tag color="blue">运行中</a-tag>
-          <span class="status-meta">任务 {{ runningJob.id }} · {{ runningJob.scenario || form.scenario }} · step {{ runningJob.step_n || form.step_n }}</span>
+          <span class="status-meta">任务 {{ runningJob.id }} · {{ runningJob.scenario || form.scenario }} · {{ runningJob.loop_n || form.loop_n }} 轮</span>
         </template>
-        <span v-else class="status-meta">当前无运行中任务</span>
+        <template v-else-if="lastJob">
+          <a-tag :color="lastJobTag.color">{{ lastJobTag.text }}</a-tag>
+          <span class="status-meta">
+            最近任务 {{ lastJob.id }}
+            · {{ lastJob.scenario || '-' }}
+            · {{ lastJob.loop_n != null ? lastJob.loop_n : '-' }} 轮
+            · 退出码 {{ lastJob.exit_code != null ? lastJob.exit_code : '-' }}
+          </span>
+        </template>
+        <span v-else class="status-meta">尚无任务记录</span>
       </div>
+
+      <a-alert
+        v-if="lastJobBanner.show"
+        :type="lastJobBanner.type"
+        show-icon
+        :message="lastJobBanner.message"
+        :description="lastJobBanner.description"
+        style="margin-top: 12px"
+      />
 
       <div class="log-panel">
         <div class="log-header">
           <strong>日志尾部</strong>
           <a-tag v-if="runningJob" color="processing">每 3 秒刷新</a-tag>
+          <a-button
+            v-if="logJobId"
+            size="small"
+            type="link"
+            @click="loadLogs(logJobId)"
+          >
+            刷新日志
+          </a-button>
         </div>
         <pre class="log-pre">{{ logText || '暂无日志' }}</pre>
       </div>
@@ -105,8 +174,36 @@
         :data-source="sessions"
         :pagination="{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }"
         :row-selection="sessionRowSelection"
-      />
+      >
+        <template slot="sessionAction" slot-scope="text, record">
+          <a-button
+            type="link"
+            size="small"
+            @click="openSessionDetail(record)"
+          >
+            查看详情
+          </a-button>
+          <a-button
+            type="danger"
+            size="small"
+            ghost
+            icon="delete"
+            :disabled="bridgeOffline || deletingSessionId === record.id"
+            :loading="deletingSessionId === record.id"
+            @click="confirmDeleteSession(record)"
+          >
+            删除
+          </a-button>
+        </template>
+      </a-table>
     </section>
+
+    <session-detail
+      v-if="selectedDetailSessionId"
+      :session-id="selectedDetailSessionId"
+      @import="fillImportFromDetail"
+      @close="selectedDetailSessionId = ''"
+    />
 
     <section class="workspace-card import-card">
       <h2 class="section-title">导入分数</h2>
@@ -188,17 +285,21 @@ import {
   fetchRdagentStatus,
   fetchRdagentJobLogs,
   fetchRdagentSessions,
+  deleteRdagentSession,
   importFromSession,
+  fetchRdagentDataSources,
   startRdagentJob,
   startRdagentUi,
   stopRdagentJob
 } from '@/api/rdagent'
 import { createVisibilityPolling } from '@/utils/visibilityPolling'
+import SessionDetail from './SessionDetail.vue'
 
 const UI_URL = 'http://127.0.0.1:19899'
 
 export default {
   name: 'RdAgentLab',
+  components: { SessionDetail },
   data () {
     return {
       bridgeOffline: false,
@@ -206,15 +307,26 @@ export default {
       starting: false,
       stopping: false,
       sessionsLoading: false,
+      deletingSessionId: '',
+      selectedDetailSessionId: '',
+      dataSourcesLoading: false,
       importing: false,
       importResult: null,
       statusData: null,
       runningJob: null,
+      lastJob: null,
+      previousRunningJobId: null,
       logText: '',
+      logJobId: null,
       sessions: [],
+      dataSources: [],
+      datesTouched: false,
       form: {
         scenario: 'fin_factor',
-        step_n: 1
+        data_source: 'quantmind',
+        start_date: undefined,
+        end_date: undefined,
+        loop_n: 1
       },
       importForm: {
         session_id: undefined,
@@ -230,7 +342,13 @@ export default {
       sessionColumns: [
         { title: '会话 ID', dataIndex: 'id', key: 'id' },
         { title: '更新时间', dataIndex: 'mtime', key: 'mtime', width: 220 },
-        { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true }
+        { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true },
+        {
+          title: '操作',
+          key: 'action',
+          width: 180,
+          scopedSlots: { customRender: 'sessionAction' }
+        }
       ],
       poller: null
     }
@@ -239,6 +357,78 @@ export default {
     ...mapState({ navTheme: state => state.app.theme }),
     isDarkTheme () { return ['dark', 'realdark'].includes(this.navTheme) },
     bridgeConnected () { return !this.bridgeOffline && this.statusData && this.statusData.ok !== false },
+    dataSourceOptions () {
+      if (this.dataSources.length) return this.dataSources
+      return [
+        { id: 'default', label: '官方 cn_data（约至 2020）', exists: true },
+        { id: 'quantmind', label: 'QuantMInd（至 2026-05）', exists: true }
+      ]
+    },
+    llmSyncTag () {
+      const sync = (this.statusData && this.statusData.llm_sync) || {}
+      if (!this.bridgeConnected) return {}
+      if (sync.applied && sync.chat_model) {
+        return { color: 'green', text: `LLM 已同步 QD · ${sync.provider || ''} · ${sync.chat_model}` }
+      }
+      if (sync.enabled && sync.error) {
+        return { color: 'orange', text: `LLM 同步失败 · ${sync.error}` }
+      }
+      if (sync.enabled === false) {
+        return { color: 'default', text: 'LLM 使用 workspace .env' }
+      }
+      return { color: 'default', text: 'LLM 同步状态未知' }
+    },
+    lastJobTag () {
+      const status = String((this.lastJob && this.lastJob.status) || '').toLowerCase()
+      if (status === 'succeeded' || status === 'completed') return { color: 'green', text: '最近任务成功' }
+      if (status === 'failed') return { color: 'red', text: '最近任务失败' }
+      if (status === 'stopped') return { color: 'orange', text: '最近任务已停止' }
+      return { color: 'default', text: status ? `最近任务 ${status}` : '最近任务' }
+    },
+    lastJobBanner () {
+      if (this.runningJob || !this.lastJob) return { show: false }
+      const status = String(this.lastJob.status || '').toLowerCase()
+      const id = this.lastJob.id || '-'
+      const sessionHint = this.newestSessionId
+      if (status === 'succeeded' || status === 'completed') {
+        return {
+          show: true,
+          type: this.logLooksRateLimited ? 'warning' : 'success',
+          message: this.logLooksRateLimited
+            ? `任务 ${id} 进程已结束（退出码 ${this.lastJob.exit_code}），但日志出现 LLM 额度/限流错误`
+            : `任务 ${id} 已成功结束`,
+          description: sessionHint
+            ? `会话 ${sessionHint}。请打开 RD UI（19899）核对因子/回测；若要进策略，在下方导入分数。`
+            : '请刷新历史会话，并打开 RD UI（19899）核对产出；确认有分数后再导入。'
+        }
+      }
+      if (status === 'failed') {
+        return {
+          show: true,
+          type: 'error',
+          message: `任务 ${id} 失败（退出码 ${this.lastJob.exit_code != null ? this.lastJob.exit_code : '-'}）`,
+          description: this.logLooksRateLimited
+            ? '日志含余额不足/429，请先给 QD 所用 LLM 充值或换模型后再启动。'
+            : '请查看下方日志尾部定位错误。'
+        }
+      }
+      if (status === 'stopped') {
+        return {
+          show: true,
+          type: 'warning',
+          message: `任务 ${id} 已手动停止`,
+          description: '可重新启动；未完成会话通常没有可导入分数。'
+        }
+      }
+      return { show: false }
+    },
+    newestSessionId () {
+      return this.sessions && this.sessions.length ? this.sessions[0].id : ''
+    },
+    logLooksRateLimited () {
+      const text = this.logText || ''
+      return /429|RateLimit|余额不足|无可用资源包/.test(text)
+    },
     sessionRowSelection () {
       return {
         type: 'radio',
@@ -266,10 +456,47 @@ export default {
     async refreshAll () {
       this.refreshing = true
       try {
-        await Promise.all([this.loadStatus(), this.loadSessions()])
+        await Promise.all([this.loadStatus(), this.loadSessions(), this.loadDataSources()])
       } finally {
         this.refreshing = false
       }
+    },
+    async loadDataSources () {
+      this.dataSourcesLoading = true
+      try {
+        const res = await fetchRdagentDataSources()
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        const list = this.unwrap(res) || []
+        this.dataSources = Array.isArray(list) ? list : []
+        const active = this.dataSources.find(d => d.active && d.exists !== false)
+        const preferred = this.dataSources.find(d => d.id === 'quantmind' && d.exists !== false)
+        if (active) {
+          this.form.data_source = active.id
+        } else if (preferred) {
+          this.form.data_source = preferred.id
+        } else if (this.dataSources.length && !this.dataSources.some(d => d.id === this.form.data_source && d.exists !== false)) {
+          const firstOk = this.dataSources.find(d => d.exists !== false)
+          if (firstOk) this.form.data_source = firstOk.id
+        }
+        this.applyCalendarDefaults(this.form.data_source)
+      } catch (error) {
+        // keep fallback options
+      } finally {
+        this.dataSourcesLoading = false
+      }
+    },
+    onDatesTouched () {
+      this.datesTouched = true
+    },
+    onDataSourceChange (id) {
+      this.applyCalendarDefaults(id)
+    },
+    applyCalendarDefaults (dataSourceId) {
+      if (this.datesTouched) return
+      const item = (this.dataSources || []).find(d => d.id === dataSourceId)
+      if (!item) return
+      this.form.start_date = item.calendar_start || undefined
+      this.form.end_date = item.calendar_end || undefined
     },
     async loadStatus () {
       try {
@@ -278,6 +505,7 @@ export default {
           this.bridgeOffline = true
           this.statusData = null
           this.runningJob = null
+          this.lastJob = null
           this.logText = ''
           this.stopPolling()
           return
@@ -285,17 +513,40 @@ export default {
         this.bridgeOffline = false
         this.statusData = this.unwrap(res) || {}
         const running = Array.isArray(this.statusData.running_jobs) ? this.statusData.running_jobs : []
-        this.runningJob = running.length ? running[0] : null
+        const nextRunning = running.length ? running[0] : null
+        this.lastJob = this.statusData.last_job || null
+
+        // 从运行中变为结束：弹一次明确结果
+        if (this.previousRunningJobId && !nextRunning) {
+          const done = this.lastJob && this.lastJob.id === this.previousRunningJobId
+            ? this.lastJob
+            : this.lastJob
+          const status = String((done && done.status) || '').toLowerCase()
+          if (status === 'succeeded' || status === 'completed') {
+            this.$message.success(`挖掘任务已结束：成功（${done.id}）`)
+          } else if (status === 'failed') {
+            this.$message.error(`挖掘任务已结束：失败（${done && done.id ? done.id : this.previousRunningJobId}）`)
+          } else if (status === 'stopped') {
+            this.$message.warning(`挖掘任务已停止（${done && done.id ? done.id : this.previousRunningJobId}）`)
+          } else {
+            this.$message.info('挖掘任务已结束，请查看最近任务状态')
+          }
+          await this.loadSessions()
+        }
+        this.previousRunningJobId = nextRunning ? nextRunning.id : null
+        this.runningJob = nextRunning
         this.syncPolling()
-        if (this.runningJob) {
-          await this.loadLogs(this.runningJob.id)
-        } else {
-          this.logText = ''
+
+        const jobForLogs = this.runningJob || this.lastJob
+        if (jobForLogs && jobForLogs.id) {
+          this.logJobId = jobForLogs.id
+          await this.loadLogs(jobForLogs.id)
         }
       } catch (error) {
         this.bridgeOffline = true
         this.statusData = null
         this.runningJob = null
+        this.lastJob = null
         this.logText = ''
         this.stopPolling()
       }
@@ -310,6 +561,38 @@ export default {
         this.$message.error(error.backendMessage || error.message || '加载会话失败')
       } finally {
         this.sessionsLoading = false
+      }
+    },
+    confirmDeleteSession (record) {
+      if (!record || !record.id) return
+      this.$confirm({
+        title: '删除会话',
+        content: `确定删除会话 ${record.id}？目录将从磁盘移除，且不可恢复。`,
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => this.deleteSession(record.id)
+      })
+    },
+    async deleteSession (sessionId) {
+      this.deletingSessionId = sessionId
+      try {
+        const res = await deleteRdagentSession(sessionId)
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.$message.success(`已删除会话 ${sessionId}`)
+        if (this.importForm.session_id === sessionId) {
+          this.importForm.session_id = undefined
+        }
+        if (this.selectedDetailSessionId === sessionId) {
+          this.selectedDetailSessionId = ''
+        }
+        this.selectedSessionKeys = this.selectedSessionKeys.filter(id => id !== sessionId)
+        await this.loadSessions()
+      } catch (error) {
+        this.$message.error(error.backendMessage || error.message || '删除会话失败')
+        throw error
+      } finally {
+        this.deletingSessionId = ''
       }
     },
     async loadLogs (jobId) {
@@ -345,10 +628,14 @@ export default {
     async handleStart () {
       this.starting = true
       try {
-        const res = await startRdagentJob({
+        const payload = {
           scenario: this.form.scenario,
-          step_n: this.form.step_n
-        })
+          loop_n: this.form.loop_n,
+          data_source: this.form.data_source || 'default'
+        }
+        if (this.form.start_date) payload.start_date = this.form.start_date
+        if (this.form.end_date) payload.end_date = this.form.end_date
+        const res = await startRdagentJob(payload)
         if (!this.isSuccess(res)) throw new Error(res && res.msg)
         this.$message.success('任务已启动')
         await this.loadStatus()
@@ -379,6 +666,18 @@ export default {
         // 即使启动接口失败也尝试打开本地 UI
       }
       window.open(UI_URL, '_blank')
+    },
+    openSessionDetail (record) {
+      if (!record || !record.id) return
+      this.selectedDetailSessionId = record.id
+      this.selectedSessionKeys = [record.id]
+      this.importForm.session_id = record.id
+    },
+    fillImportFromDetail (sessionId) {
+      if (!sessionId) return
+      this.importForm.session_id = sessionId
+      this.selectedSessionKeys = [sessionId]
+      this.$message.success(`已填入导入会话 ${sessionId}`)
     },
     async handleImport () {
       if (!this.importForm.session_id) {
@@ -471,6 +770,12 @@ export default {
 }
 .job-form {
   margin-bottom: 14px;
+}
+.date-hint {
+  margin: 0 0 12px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .status-row {
   display: flex;

@@ -359,6 +359,57 @@
                 />
 
                 <section
+                  v-if="currentLlmProvider === 'custom'"
+                  class="ai-settings-section custom-llm-profiles"
+                >
+                  <div class="ai-section-header">
+                    <div>
+                      <h4>{{ tOr('settings.llm.customProfilesTitle', 'Custom API profiles') }}</h4>
+                      <p>{{ tOr('settings.llm.customProfilesDesc', 'Save multiple OpenAI-compatible endpoints and switch without overwriting.') }}</p>
+                    </div>
+                    <a-tag color="purple">
+                      {{ tOr('settings.llm.customProfilesBadge', 'Profiles') }}
+                    </a-tag>
+                  </div>
+                  <a-row :gutter="16" type="flex" align="middle">
+                    <a-col :xs="24" :md="14">
+                      <a-select
+                        :value="activeCustomProfileId"
+                        style="width: 100%"
+                        :placeholder="tOr('settings.llm.customProfilesSelect', 'Select a profile')"
+                        @change="onCustomProfileChange"
+                      >
+                        <a-select-option
+                          v-for="profile in customProfiles"
+                          :key="profile.id"
+                          :value="profile.id"
+                        >
+                          {{ profile.name }} — {{ profile.model || profile.url || profile.id }}
+                        </a-select-option>
+                      </a-select>
+                    </a-col>
+                    <a-col :xs="24" :md="10" class="custom-profile-actions">
+                      <a-button size="small" icon="plus" @click="addCustomProfile">
+                        {{ tOr('settings.llm.customProfilesAdd', 'Add') }}
+                      </a-button>
+                      <a-button size="small" icon="edit" @click="renameCustomProfile">
+                        {{ tOr('settings.llm.customProfilesRename', 'Rename') }}
+                      </a-button>
+                      <a-button
+                        size="small"
+                        type="danger"
+                        ghost
+                        icon="delete"
+                        :disabled="customProfiles.length <= 1"
+                        @click="deleteCustomProfile"
+                      >
+                        {{ tOr('settings.llm.customProfilesDelete', 'Delete') }}
+                      </a-button>
+                    </a-col>
+                  </a-row>
+                </section>
+
+                <section
                   v-for="section in aiSections"
                   :key="section.key"
                   class="ai-settings-section"
@@ -751,7 +802,9 @@ export default {
       universeOverview: null,
       selectedUniverseCodes: [],
       selectedLlmProvider: '',
-      settingsInputNonce: Math.random().toString(36).slice(2, 10)
+      settingsInputNonce: Math.random().toString(36).slice(2, 10),
+      customProfiles: [],
+      activeCustomProfileId: ''
     }
   },
   computed: {
@@ -798,6 +851,7 @@ export default {
       const out = []
       for (const [groupKey, group] of Object.entries(this.sortedSchema)) {
         for (const item of (group.items || [])) {
+          if (item.ui_hidden) continue
           const label = (this.getItemLabel(groupKey, item) || '').toLowerCase()
           const desc = (this.getItemDescription(groupKey, item) || '').toLowerCase()
           const key = (item.key || '').toLowerCase()
@@ -918,9 +972,12 @@ export default {
     },
     aiSections () {
       const providerSelection = this.aiItems.filter(item => item.key === 'LLM_PROVIDER')
-      const providerItems = this.aiItems.filter(item => item.group === this.currentLlmProvider)
+      const providerItems = this.aiItems.filter(item => {
+        if (item.ui_hidden) return false
+        return item.group === this.currentLlmProvider
+      })
       const commonItems = this.aiItems.filter(item => {
-        if (item.key === 'LLM_PROVIDER' || item.group || this.isSearchSetting(item)) return false
+        if (item.key === 'LLM_PROVIDER' || item.group || this.isSearchSetting(item) || item.ui_hidden) return false
         return true
       })
       return [
@@ -1253,6 +1310,7 @@ export default {
         if (valuesRes.code === 1) {
           this.values = valuesRes.data
           this.selectedLlmProvider = (this.values.ai && this.values.ai.LLM_PROVIDER) || 'openrouter'
+          this.hydrateCustomProfilesFromValues()
         }
 
         if (marketModulesRes && marketModulesRes.code === 1 && marketModulesRes.data) {
@@ -1491,6 +1549,127 @@ export default {
       })
     },
 
+    newCustomProfileId () {
+      return `p_${Math.random().toString(36).slice(2, 10)}`
+    },
+    hydrateCustomProfilesFromValues () {
+      const ai = (this.values && this.values.ai) || {}
+      const list = Array.isArray(ai.CUSTOM_LLM_PROFILE_LIST) ? ai.CUSTOM_LLM_PROFILE_LIST : []
+      this.customProfiles = list.map(item => ({
+        id: item.id,
+        name: item.name || item.model || item.id,
+        url: item.url || '',
+        model: item.model || '',
+        key: '',
+        key_configured: !!item.key_configured
+      }))
+      this.activeCustomProfileId = ai.CUSTOM_ACTIVE_PROFILE || (this.customProfiles[0] && this.customProfiles[0].id) || ''
+      if (!this.customProfiles.length && (ai.CUSTOM_API_URL || ai.CUSTOM_MODEL)) {
+        const id = this.newCustomProfileId()
+        this.customProfiles = [{
+          id,
+          name: ai.CUSTOM_MODEL || 'Custom',
+          url: ai.CUSTOM_API_URL || '',
+          model: ai.CUSTOM_MODEL || '',
+          key: '',
+          key_configured: !!ai.CUSTOM_API_KEY_configured
+        }]
+        this.activeCustomProfileId = id
+      }
+    },
+    syncActiveCustomProfileFromForm () {
+      if (!this.activeCustomProfileId || !this.customProfiles.length) return
+      const values = this.form.getFieldsValue(['CUSTOM_API_URL', 'CUSTOM_API_KEY', 'CUSTOM_MODEL']) || {}
+      const idx = this.customProfiles.findIndex(p => p.id === this.activeCustomProfileId)
+      if (idx < 0) return
+      const current = { ...this.customProfiles[idx] }
+      if (values.CUSTOM_API_URL !== undefined) current.url = String(values.CUSTOM_API_URL || '')
+      if (values.CUSTOM_MODEL !== undefined) current.model = String(values.CUSTOM_MODEL || '')
+      if (values.CUSTOM_API_KEY) {
+        current.key = String(values.CUSTOM_API_KEY)
+        current.key_configured = true
+      }
+      this.$set(this.customProfiles, idx, current)
+    },
+    applyCustomProfileToForm (profileId) {
+      const profile = this.customProfiles.find(p => p.id === profileId)
+      if (!profile) return
+      this.activeCustomProfileId = profileId
+      this.$nextTick(() => {
+        this.form.setFieldsValue({
+          CUSTOM_API_URL: profile.url || '',
+          CUSTOM_MODEL: profile.model || '',
+          CUSTOM_API_KEY: ''
+        })
+        if (this.values.ai) {
+          this.$set(this.values.ai, 'CUSTOM_API_KEY_configured', !!profile.key_configured || !!profile.key)
+          this.$set(this.values.ai, 'CUSTOM_API_URL', profile.url || '')
+          this.$set(this.values.ai, 'CUSTOM_MODEL', profile.model || '')
+        }
+      })
+    },
+    onCustomProfileChange (profileId) {
+      this.syncActiveCustomProfileFromForm()
+      this.applyCustomProfileToForm(profileId)
+    },
+    addCustomProfile () {
+      this.syncActiveCustomProfileFromForm()
+      const defaultName = this.tOr('settings.llm.customProfilesNewName', 'New profile')
+      const value = window.prompt(
+        this.tOr('settings.llm.customProfilesNamePrompt', 'Profile name'),
+        defaultName
+      )
+      if (value === null) return
+      const id = this.newCustomProfileId()
+      const name = String(value || '').trim() || defaultName
+      this.customProfiles.push({
+        id,
+        name,
+        url: '',
+        model: '',
+        key: '',
+        key_configured: false
+      })
+      this.applyCustomProfileToForm(id)
+    },
+    renameCustomProfile () {
+      const profile = this.customProfiles.find(p => p.id === this.activeCustomProfileId)
+      if (!profile) return
+      const value = window.prompt(
+        this.tOr('settings.llm.customProfilesNamePrompt', 'Profile name'),
+        profile.name
+      )
+      if (value === null) return
+      const name = String(value || '').trim()
+      if (!name) return
+      profile.name = name
+    },
+    deleteCustomProfile () {
+      if (this.customProfiles.length <= 1) return
+      const id = this.activeCustomProfileId
+      this.$confirm({
+        title: this.tOr('settings.llm.customProfilesDeleteConfirm', 'Delete this profile?'),
+        onOk: () => {
+          this.customProfiles = this.customProfiles.filter(p => p.id !== id)
+          const next = this.customProfiles[0]
+          if (next) this.applyCustomProfileToForm(next.id)
+        }
+      })
+    },
+    buildCustomProfilesPayload () {
+      this.syncActiveCustomProfileFromForm()
+      return {
+        profiles: this.customProfiles.map(p => ({
+          id: p.id,
+          name: p.name || p.model || p.id,
+          url: p.url || '',
+          model: p.model || '',
+          // blank key => backend keeps previous secret for this id
+          key: p.key || ''
+        }))
+      }
+    },
+
     async handleSave () {
       this.form.validateFields(async (err, formValues) => {
         if (err) {
@@ -1526,6 +1705,21 @@ export default {
                 }
                 data[groupKey][item.key] = value
               }
+            }
+          }
+
+          if (!data.ai) data.ai = {}
+          if ((formValues.LLM_PROVIDER || this.currentLlmProvider) === 'custom' || this.customProfiles.length) {
+            const payload = this.buildCustomProfilesPayload()
+            data.ai.CUSTOM_LLM_PROFILES = JSON.stringify(payload)
+            data.ai.CUSTOM_ACTIVE_PROFILE = this.activeCustomProfileId || ''
+            // Ensure active credentials follow the selected profile even if
+            // ant form omitted unchanged fields.
+            const active = this.customProfiles.find(p => p.id === this.activeCustomProfileId)
+            if (active) {
+              data.ai.CUSTOM_API_URL = active.url || ''
+              data.ai.CUSTOM_MODEL = active.model || ''
+              if (active.key) data.ai.CUSTOM_API_KEY = active.key
             }
           }
 
@@ -1846,6 +2040,19 @@ export default {
     .ai-provider-alert {
       margin-bottom: 20px;
       border-radius: 8px;
+    }
+
+    .custom-profile-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-start;
+      margin-top: 8px;
+
+      @media (min-width: 768px) {
+        margin-top: 0;
+        justify-content: flex-end;
+      }
     }
 
     .ai-settings-section {
