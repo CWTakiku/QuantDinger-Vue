@@ -56,6 +56,25 @@ export function importFromSession (data) {
   })
 }
 
+/** Forward-score on latest Qlib bars; optionally import (default true). */
+export function inferFromSession (data) {
+  return request({
+    url: '/api/rdagent/infer-from-session',
+    method: 'post',
+    data,
+    timeout: IMPORT_TIMEOUT_MS
+  })
+}
+
+export function fetchAlphaPreview (params) {
+  return request({
+    url: '/api/rdagent/alpha-preview',
+    method: 'get',
+    params,
+    timeout: 60000
+  })
+}
+
 export function fetchSessionDetail (id, include) {
   return request({
     url: `/api/rdagent/sessions/${encodeURIComponent(id)}/detail`,

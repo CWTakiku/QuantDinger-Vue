@@ -113,13 +113,54 @@
               :description="backtestRangeAlertDescription"
             />
 
+            <div v-if="mode === 'portfolio' && usesExternalAlphaParams" class="params-section quant-model-section">
+              <div class="subheading">
+                <h3>{{ $t('strategyV2.backtest.quantModelTitle') }}</h3>
+                <span>{{ $t('strategyV2.backtest.quantModelHint') }}</span>
+              </div>
+              <a-form-item :label="$t('strategyV2.backtest.quantModel')">
+                <a-select
+                  v-model="selectedModelKey"
+                  allow-clear
+                  show-search
+                  option-filter-prop="children"
+                  class="full-width"
+                  data-testid="backtest-quant-model-select"
+                  :placeholder="$t('strategyV2.backtest.quantModelPlaceholder')"
+                  :loading="quantModelsLoading"
+                  :not-found-content="quantModelsLoading ? undefined : $t('strategyV2.backtest.quantModelEmpty')"
+                  @change="onQuantModelChange"
+                >
+                  <a-select-option
+                    v-for="model in quantModels"
+                    :key="model.model_key"
+                    :value="model.model_key"
+                  >
+                    {{ quantModelLabel(model) }}
+                  </a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-alert
+                v-if="selectedQuantModel"
+                type="info"
+                show-icon
+                class="quant-model-alert"
+                :message="selectedQuantModel.display_name || selectedQuantModel.model_key"
+                :description="$t('strategyV2.backtest.quantModelSelectedDesc', {
+                  source: params.source || selectedQuantModel.alpha_source,
+                  version: params.version || selectedQuantModel.alpha_version
+                })"
+              />
+              <p v-if="!selectedModelKey" class="manual-alpha-hint">{{ $t('strategyV2.backtest.manualAlphaHint') }}</p>
+            </div>
+
             <div v-if="mode === 'portfolio' && paramDefinitions.length" class="params-section">
               <div class="subheading">
                 <h3>{{ $t('backtest-center.codeParams') }}</h3>
                 <span>{{ $t('strategyV2.backtest.paramCount', { count: paramDefinitions.length }) }}</span>
               </div>
               <div class="form-grid">
-                <a-form-item v-for="item in paramDefinitions" :key="item.name" :label="parameterLabel(item)">
+                <a-form-item v-for="item in visibleParamDefinitions" :key="item.name" :label="parameterLabel(item)">
                   <a-switch
                     v-if="item.type === 'boolean'"
                     :checked="Boolean(params[item.name])"
@@ -254,6 +295,10 @@
           <h3>{{ mode === 'factor' ? $t('strategyV2.factorResearch.runningTitle') : $t('strategyV2.backtest.runningTitle') }}</h3>
           <p>{{ mode === 'factor' ? $t('strategyV2.factorResearch.runningDesc') : $t('strategyV2.backtest.runningDesc') }}</p>
           <strong>{{ $t('strategyV2.backtest.elapsed', { seconds: runElapsedSeconds }) }}</strong>
+          <div v-if="usingQuantModelRun && (modelJobPhaseLabel || modelJobProgressLabel)" class="model-job-progress" data-testid="model-job-progress">
+            <span v-if="modelJobPhaseLabel" class="model-job-phase">{{ modelJobPhaseLabel }}</span>
+            <span v-if="modelJobProgressLabel" class="model-job-dates">{{ modelJobProgressLabel }}</span>
+          </div>
           <a-button class="running-stop-btn" type="danger" ghost icon="stop" data-testid="stop-backtest-panel" @click="stopActive">
             {{ $t('backtest-center.stopBacktest') }}
           </a-button>
@@ -398,10 +443,13 @@ import {
   getStrategyFactorResearchHistory,
   getStrategyFactorResearchRun,
   deleteStrategyFactorResearchRun,
+  fetchQuantModelJob,
   listExternalAlphaPanels,
+  runBacktestWithModel,
   runStrategyFactorResearch,
   runStrategyBacktest
 } from '@/api/strategy'
+import { fetchQuantModels } from '@/api/quantModels'
 import {
   clearBacktestRunSession,
   getBacktestRunSession,
@@ -428,6 +476,11 @@ export default {
       params: {},
       externalAlphaPanels: [],
       externalAlphaPanelsLoading: false,
+      quantModels: [],
+      quantModelsLoading: false,
+      selectedModelKey: null,
+      modelJobProgress: null,
+      modelJobPhase: '',
       result: null,
       factorResult: null,
       selectedRun: null,
@@ -550,10 +603,44 @@ export default {
       if (!this.manifest || this.backtestRangeExceeded || (this.mode === 'factor' && !this.factorCompatible)) {
         return true
       }
-      if (this.usesExternalAlphaParams && !String(this.params.version || '').trim()) {
-        return true
+      if (this.usesExternalAlphaParams) {
+        if (!this.selectedModelKey && !String(this.params.version || '').trim()) {
+          return true
+        }
       }
       return false
+    },
+    usingQuantModelRun () {
+      return this.usesExternalAlphaParams && Boolean(this.selectedModelKey)
+    },
+    selectedQuantModel () {
+      if (!this.selectedModelKey) return null
+      return this.quantModels.find(item => item.model_key === this.selectedModelKey) || null
+    },
+    visibleParamDefinitions () {
+      if (!this.usesExternalAlphaParams || !this.selectedModelKey) {
+        return this.paramDefinitions
+      }
+      return this.paramDefinitions.filter(item => !this.isExternalAlphaPanelParam(item))
+    },
+    modelJobPhaseLabel () {
+      const phase = this.modelJobPhase || (this.modelJobProgress && this.modelJobProgress.phase) || ''
+      if (!phase) return ''
+      const key = `strategyV2.backtest.modelJobPhase.${phase}`
+      const label = this.$t(key)
+      return label !== key ? label : phase
+    },
+    modelJobProgressLabel () {
+      const progress = this.modelJobProgress
+      if (!progress) return ''
+      const done = progress.done_dates != null ? progress.done_dates : progress.inferred
+      const total = progress.total_dates != null ? progress.total_dates : progress.count
+      if (done != null && total != null) {
+        return this.$t('strategyV2.backtest.modelJobProgress', { done, total })
+      }
+      if (progress.percent != null) return `${progress.percent}%`
+      if (progress.message) return String(progress.message)
+      return ''
     },
     usesExternalAlphaParams () {
       const names = new Set(this.paramDefinitions.map(item => item && item.name).filter(Boolean))
@@ -882,7 +969,11 @@ export default {
         output[item.name] = item.default
         return output
       }, {})
+      this.selectedModelKey = null
+      this.modelJobProgress = null
+      this.modelJobPhase = ''
       await this.loadExternalAlphaPanels()
+      await this.loadQuantModels()
     },
     sourceTypeLabel (item) {
       if (String(item.template_key || '').startsWith('robot_v2_')) return this.$t('strategyV2.robot')
@@ -966,12 +1057,107 @@ export default {
         const response = await listExternalAlphaPanels()
         const data = (response && response.data) || {}
         this.externalAlphaPanels = Array.isArray(data.panels) ? data.panels : []
-        this.ensureExternalAlphaSelection()
+        if (!this.selectedModelKey) {
+          this.ensureExternalAlphaSelection()
+        }
       } catch (error) {
         this.externalAlphaPanels = []
         this.$message.warning(this.$t('strategyV2.params.alphaPanelsLoadFailed'))
       } finally {
         this.externalAlphaPanelsLoading = false
+      }
+    },
+    quantModelLabel (model) {
+      if (!model) return ''
+      const name = model.display_name || model.model_key || ''
+      const parts = [name]
+      if (model.universe) parts.push(model.universe)
+      if (model.kind) parts.push(model.kind)
+      return parts.filter(Boolean).join(' · ')
+    },
+    onQuantModelChange (modelKey) {
+      this.selectedModelKey = modelKey || null
+      if (!modelKey) return
+      const model = this.quantModels.find(item => item.model_key === modelKey)
+      if (model) {
+        this.setParam('source', model.alpha_source || 'rdagent')
+        this.setParam('version', model.alpha_version || '')
+      }
+    },
+    async loadQuantModels () {
+      if (!this.usesExternalAlphaParams) {
+        this.quantModels = []
+        this.selectedModelKey = null
+        return
+      }
+      this.quantModelsLoading = true
+      try {
+        const response = await fetchQuantModels({ status: 'published' })
+        const data = (response && response.data) != null ? response.data : response
+        this.quantModels = Array.isArray(data) ? data : []
+        if (this.selectedModelKey && !this.quantModels.some(item => item.model_key === this.selectedModelKey)) {
+          this.selectedModelKey = null
+        }
+        if (this.quantModels.length === 1 && !this.selectedModelKey) {
+          this.onQuantModelChange(this.quantModels[0].model_key)
+        }
+      } catch (error) {
+        this.quantModels = []
+        this.$message.warning(this.$t('strategyV2.backtest.quantModelsLoadFailed'))
+      } finally {
+        this.quantModelsLoading = false
+      }
+    },
+    sleep (ms, signal) {
+      return new Promise((resolve, reject) => {
+        if (signal && signal.aborted) {
+          const err = new Error('backtestRunSession.cancelled')
+          err.code = 'ERR_CANCELED'
+          err.name = 'CanceledError'
+          reject(err)
+          return
+        }
+        const timer = window.setTimeout(resolve, ms)
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            window.clearTimeout(timer)
+            const err = new Error('backtestRunSession.cancelled')
+            err.code = 'ERR_CANCELED'
+            err.name = 'CanceledError'
+            reject(err)
+          }, { once: true })
+        }
+      })
+    },
+    async pollQuantModelJob (jobId, signal) {
+      const pollMs = 2000
+      while (true) {
+        if (signal && signal.aborted) {
+          const err = new Error('backtestRunSession.cancelled')
+          err.code = 'ERR_CANCELED'
+          err.name = 'CanceledError'
+          throw err
+        }
+        const envelope = await fetchQuantModelJob(jobId)
+        const snapshot = this.unwrapBacktestEnvelope(envelope, 'portfolio')
+        this.modelJobPhase = snapshot.phase || ''
+        this.modelJobProgress = snapshot.progress || null
+        if (snapshot.status === 'succeeded') {
+          const inner = (snapshot.result && snapshot.result.result) || snapshot.result
+          if (inner && typeof inner === 'object') {
+            if (!inner.runId && snapshot.result && snapshot.result.run_id) {
+              inner.runId = snapshot.result.run_id
+            }
+            return inner
+          }
+          throw new Error(this.$t('strategyV2.backtest.modelJobEmptyResult'))
+        }
+        if (snapshot.status === 'failed') {
+          const err = new Error(String(snapshot.error || this.$t('strategyV2.backtest.runFailed')))
+          err.backendMessage = String(snapshot.error || '')
+          throw err
+        }
+        await this.sleep(pollMs, signal)
       }
     },
     disabledStartDate (current) {
@@ -1150,9 +1336,20 @@ export default {
         leverage: this.form.leverageEnabled ? this.form.leverage : 1,
         params: this.params
       }
+      const useModel = this.usingQuantModelRun
       const session = startBacktestRunSession({
         mode: 'portfolio',
         runner: async (signal) => {
+          if (useModel) {
+            const submitPayload = { ...payload, model_key: this.selectedModelKey }
+            const envelope = await runBacktestWithModel(submitPayload, { signal })
+            const queued = this.unwrapBacktestEnvelope(envelope, 'portfolio')
+            const jobId = queued && (queued.job_id || queued.jobId)
+            if (!jobId) {
+              throw new Error(this.$t('strategyV2.backtest.modelJobMissingId'))
+            }
+            return this.pollQuantModelJob(jobId, signal)
+          }
           const envelope = await runStrategyBacktest(payload, { signal })
           return this.unwrapBacktestEnvelope(envelope, 'portfolio')
         }
@@ -1161,6 +1358,8 @@ export default {
       this.runError = ''
       this.result = null
       this.selectedRun = null
+      this.modelJobProgress = null
+      this.modelJobPhase = ''
       this.startRunTimer(session.startedAt)
       try {
         const data = await session.promise
@@ -1178,6 +1377,8 @@ export default {
         if (getBacktestRunSession().id === session.id) {
           this.stopRunTimer()
           this.running = false
+          this.modelJobProgress = null
+          this.modelJobPhase = ''
           clearBacktestRunSession(session.id)
         }
       }
@@ -1477,6 +1678,11 @@ export default {
 .result-running h3 { margin: 4px 0 0; color: #17233d; font-size: 18px; }
 .result-running p { max-width: 620px; margin: 0; line-height: 1.6; }
 .result-running > strong { color: #3f7f1f; font-variant-numeric: tabular-nums; }
+.model-job-progress { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; color: #475569; font-size: 13px; }
+.model-job-phase { color: #334155; font-weight: 600; }
+.model-job-dates { font-variant-numeric: tabular-nums; }
+.quant-model-alert { margin-bottom: 8px; }
+.manual-alpha-hint { margin: 0 0 4px; color: #64748b; font-size: 12px; line-height: 1.5; }
 .running-stop-btn { margin-top: 4px; }
 .running-icon { display: inline-flex; width: 64px; height: 64px; align-items: center; justify-content: center; border: 1px solid #d9f7be; border-radius: 22px; color: #52c41a; background: #f6ffed; font-size: 27px; }
 .running-contract { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 7px; }
@@ -1550,6 +1756,9 @@ export default {
 .theme-dark .empty-preview-card { border-color: rgba(255, 255, 255, 0.1); background: #0d0d0d; }
 .theme-dark .empty-preview-card strong { color: #e5e7eb; }
 .theme-dark .result-running > strong { color: #73d13d; }
+.theme-dark .model-job-progress { color: rgba(255, 255, 255, 0.62); }
+.theme-dark .model-job-phase { color: #e5e7eb; }
+.theme-dark .manual-alpha-hint { color: rgba(255, 255, 255, 0.48); }
 .theme-dark .running-icon { border-color: rgba(82, 196, 26, 0.38); background: #10190c; }
 .theme-dark .running-contract span { border-color: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.58); background: #0d0d0d; }
 .theme-dark /deep/ .ant-form-item-label > label, .theme-dark /deep/ .ant-table { color: rgba(255, 255, 255, 0.72); }

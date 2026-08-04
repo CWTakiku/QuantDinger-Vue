@@ -24,6 +24,8 @@ const api = {
   executorCreate: '/api/strategies/executors/create',
   strategyAssets: '/api/strategy-assets',
   strategyBacktestRun: '/api/backtest/run',
+  strategyBacktestRunWithModel: '/api/backtest/run-with-model',
+  strategyBacktestModelJob: '/api/backtest/model-jobs',
   strategyFactorResearch: '/api/backtest/factor-research',
   strategyFactorResearchHistory: '/api/backtest/factor-research/history',
   strategyFactorResearchGet: '/api/backtest/factor-research/get',
@@ -282,6 +284,26 @@ export function runStrategyBacktest (data, options = {}) {
     data: payload,
     timeout,
     signal: options && options.signal
+  })
+}
+
+export function runBacktestWithModel (data, options = {}) {
+  const payload = { ...(data || {}) }
+  const timeout = Number(payload.timeout) > 0 ? Number(payload.timeout) : BACKTEST_TIMEOUT
+  delete payload.timeout
+  return request({
+    url: api.strategyBacktestRunWithModel,
+    method: 'post',
+    data: payload,
+    timeout,
+    signal: options && options.signal
+  })
+}
+
+export function fetchQuantModelJob (jobId) {
+  return request({
+    url: `${api.strategyBacktestModelJob}/${jobId}`,
+    method: 'get'
   })
 }
 

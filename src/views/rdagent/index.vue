@@ -315,6 +315,286 @@
         </template>
       </a-alert>
     </section>
+
+    <section class="workspace-card import-card">
+      <h2 class="section-title">推理打分（最新行情）</h2>
+      <p class="import-hint">
+        用会话里已训练的模型（或因子）在当前 Qlib 日历上重新算分并写入 External Alpha。
+        与上方「导入分数」不同：导入用的是挖矿当时的 pred.pkl，推理会覆盖到最新交易日。
+      </p>
+      <a-form layout="vertical" class="import-form">
+        <a-row :gutter="16">
+          <a-col :xs="24" :md="10">
+            <a-form-item label="会话 ID">
+              <a-select
+                v-model="inferForm.session_id"
+                show-search
+                allow-clear
+                placeholder="选择会话"
+                :disabled="bridgeOffline"
+                option-filter-prop="children"
+              >
+                <a-select-option v-for="item in sessions" :key="`infer-${item.id}`" :value="item.id">
+                  {{ item.id }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="4">
+            <a-form-item label="模式">
+              <a-select v-model="inferForm.mode" :disabled="bridgeOffline">
+                <a-select-option value="model">模型</a-select-option>
+                <a-select-option value="factor">因子合成</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="5">
+            <a-form-item label="Loop">
+              <a-select
+                v-model="inferForm.loop_index"
+                allow-clear
+                placeholder="不选 = 最新模型"
+                :disabled="bridgeOffline || !inferForm.session_id"
+                :loading="inferLoopsLoading"
+                @change="onInferLoopChange"
+              >
+                <a-select-option
+                  v-for="loop in inferLoopOptions"
+                  :key="`infer-loop-${loop.loop_index}`"
+                  :value="loop.loop_index"
+                >
+                  {{ importLoopOptionLabel(loop) }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="5">
+            <a-form-item label="最近交易日数">
+              <a-input-number
+                v-model="inferForm.max_asofs"
+                :min="1"
+                :max="252"
+                style="width: 100%"
+                :disabled="bridgeOffline"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="6">
+            <a-form-item label="source">
+              <a-input v-model="inferForm.source" :disabled="bridgeOffline" />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="8">
+            <a-form-item label="version">
+              <a-input
+                v-model="inferForm.version"
+                placeholder="留空则自动加 _infer_model/_infer_factor"
+                :disabled="bridgeOffline"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="4">
+            <a-form-item label="universe">
+              <a-input v-model="inferForm.universe" :disabled="bridgeOffline" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item>
+          <a-button
+            type="primary"
+            icon="thunderbolt"
+            :loading="inferring"
+            :disabled="!inferForm.session_id || bridgeOffline"
+            @click="handleInfer"
+          >
+            推理并导入 External Alpha
+          </a-button>
+        </a-form-item>
+      </a-form>
+
+      <a-alert
+        v-if="inferResult"
+        type="success"
+        show-icon
+        class="import-result"
+      >
+        <template slot="message">
+          {{ inferResult.imported ? '已推理并入库' : '已推理' }}
+          {{ inferResult.inserted != null ? inferResult.inserted : inferResult.row_count }} 行
+          · {{ inferResult.as_of_min }} → {{ inferResult.as_of_max }}
+          · mode={{ inferResult.mode }} · version={{ inferResult.version }}
+        </template>
+        <template slot="description">
+          在策略里引用 source/version 即可用最新截面分数做选股。
+          <a-button
+            v-if="!inferPreview || !(inferPreview.rows && inferPreview.rows.length)"
+            type="link"
+            size="small"
+            style="padding: 0 4px"
+            :loading="inferPreviewLoading"
+            @click="loadInferPreviewFromResult"
+          >
+            显示结果表
+          </a-button>
+        </template>
+      </a-alert>
+
+      <div v-if="inferPreview && inferPreview.rows && inferPreview.rows.length" class="infer-preview">
+        <div class="infer-preview-head">
+          <strong>推理结果预览</strong>
+          <span class="infer-preview-meta">
+            source={{ inferPreview.source }} · version={{ inferPreview.version }}
+            · 当日 {{ inferPreview.total }} 只
+            <template v-if="inferPreview.stats && inferPreview.stats.max != null">
+              · max={{ formatScore(inferPreview.stats.max) }}
+              · mean={{ formatScore(inferPreview.stats.mean) }}
+              · min={{ formatScore(inferPreview.stats.min) }}
+            </template>
+          </span>
+        </div>
+        <a-form layout="inline" class="infer-preview-form">
+          <a-form-item label="交易日">
+            <a-select
+              v-model="inferPreviewAsOf"
+              style="width: 160px"
+              :loading="inferPreviewLoading"
+              @change="onInferPreviewAsOfChange"
+            >
+              <a-select-option
+                v-for="d in (inferPreview.as_of_dates || [])"
+                :key="d"
+                :value="d"
+              >
+                {{ d }}
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item>
+            <a-radio-group
+              v-model="inferPreviewView"
+              size="small"
+              button-style="solid"
+              @change="onInferPreviewViewChange"
+            >
+              <a-radio-button value="top">Top {{ inferPreviewLimit }}</a-radio-button>
+              <a-radio-button value="bottom">Bottom {{ inferPreviewLimit }}</a-radio-button>
+            </a-radio-group>
+          </a-form-item>
+        </a-form>
+        <a-table
+          size="small"
+          row-key="rank"
+          :columns="inferPreviewColumns"
+          :data-source="inferPreviewTableRows"
+          :pagination="{ pageSize: 20, size: 'small' }"
+          :loading="inferPreviewLoading"
+          :scroll="{ y: 420 }"
+        />
+      </div>
+    </section>
+
+    <section class="workspace-card import-card">
+      <div class="section-head">
+        <h2 class="section-title">发布为量化模型</h2>
+        <a-button size="small" icon="reload" :loading="publishedModelsLoading" @click="loadPublishedModels">
+          刷新列表
+        </a-button>
+      </div>
+      <p class="import-hint">
+        将 RD 会话某一 Loop 的模型或因子配方注册为量化模型，供回测与实盘引用（alpha_version 自动绑定）。
+      </p>
+      <a-form layout="vertical" class="import-form">
+        <a-row :gutter="16">
+          <a-col :xs="24" :md="10">
+            <a-form-item label="会话 ID">
+              <a-select
+                v-model="publishForm.session_id"
+                show-search
+                allow-clear
+                placeholder="选择会话"
+                option-filter-prop="children"
+              >
+                <a-select-option v-for="item in sessions" :key="`pub-${item.id}`" :value="item.id">
+                  {{ item.id }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="5">
+            <a-form-item label="Loop" required>
+              <a-select
+                v-model="publishForm.loop_index"
+                placeholder="选择 Loop"
+                :disabled="!publishForm.session_id"
+                :loading="publishLoopsLoading"
+              >
+                <a-select-option
+                  v-for="loop in publishLoopOptions"
+                  :key="`pub-loop-${loop.loop_index}`"
+                  :value="loop.loop_index"
+                >
+                  {{ importLoopOptionLabel(loop) }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="4">
+            <a-form-item label="类型">
+              <a-select v-model="publishForm.kind" disabled :placeholder="publishForm.loop_index == null ? '随 Loop 自动' : undefined">
+                <a-select-option value="model">模型</a-select-option>
+                <a-select-option value="factor">因子</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="5">
+            <a-form-item label="显示名称" required>
+              <a-input v-model="publishForm.display_name" placeholder="如 CSI300 增强模型" />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :md="6">
+            <a-form-item label="universe">
+              <a-input v-model="publishForm.universe" placeholder="csi300" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item>
+          <a-button
+            type="primary"
+            icon="cloud-upload"
+            :loading="publishing"
+            :disabled="!canPublish"
+            @click="handlePublish"
+          >
+            发布
+          </a-button>
+        </a-form-item>
+      </a-form>
+
+      <a-alert
+        v-if="publishResult"
+        type="success"
+        show-icon
+        class="import-result"
+      >
+        <template slot="message">
+          已发布 · model_key={{ publishResult.model_key }} · alpha_version={{ publishResult.alpha_version }}
+        </template>
+        <template slot="description">
+          {{ publishResult.display_name }}（{{ publishResult.kind }} · {{ publishResult.universe || 'csi300' }}）
+        </template>
+      </a-alert>
+
+      <a-table
+        v-if="publishedModels.length"
+        size="small"
+        row-key="model_key"
+        class="published-models-table"
+        :loading="publishedModelsLoading"
+        :columns="publishedModelColumns"
+        :data-source="publishedModels"
+        :pagination="{ pageSize: 5, size: 'small' }"
+      />
+    </section>
   </div>
 </template>
 
@@ -326,6 +606,8 @@ import {
   fetchRdagentSessions,
   deleteRdagentSession,
   importFromSession,
+  inferFromSession,
+  fetchAlphaPreview,
   fetchSessionDetail,
   fetchRdagentDataSources,
   fetchRdagentUniverses,
@@ -333,6 +615,7 @@ import {
   startRdagentUi,
   stopRdagentJob
 } from '@/api/rdagent'
+import { publishQuantModel, fetchQuantModels } from '@/api/quantModels'
 import { createVisibilityPolling } from '@/utils/visibilityPolling'
 import SessionDetail from './SessionDetail.vue'
 
@@ -356,6 +639,63 @@ export default {
       importLoopsLoading: false,
       exportableLoops: [],
       importResult: null,
+      inferring: false,
+      inferLoopsLoading: false,
+      inferLoopOptions: [],
+      inferResult: null,
+      inferPreview: null,
+      inferPreviewAsOf: undefined,
+      inferPreviewLoading: false,
+      inferPreviewView: 'top',
+      inferPreviewLimit: 50,
+      publishing: false,
+      publishLoopsLoading: false,
+      publishLoopOptions: [],
+      publishResult: null,
+      publishedModelsLoading: false,
+      publishedModels: [],
+      publishedModelColumns: [
+        { title: 'model_key', dataIndex: 'model_key', key: 'model_key', ellipsis: true },
+        { title: '显示名称', dataIndex: 'display_name', key: 'display_name', ellipsis: true },
+        { title: '类型', dataIndex: 'kind', key: 'kind', width: 72 },
+        { title: 'alpha_version', dataIndex: 'alpha_version', key: 'alpha_version', ellipsis: true },
+        { title: 'universe', dataIndex: 'universe', key: 'universe', width: 96 },
+        { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 180 }
+      ],
+      publishForm: {
+        session_id: undefined,
+        loop_index: undefined,
+        kind: undefined,
+        display_name: '',
+        universe: 'csi300'
+      },
+      inferPreviewColumns: [
+        { title: '排名', dataIndex: 'rank', key: 'rank', width: 72 },
+        {
+          title: '代码',
+          dataIndex: 'symbol',
+          key: 'symbol',
+          width: 150,
+          customRender: (text) => {
+            const s = String(text || '')
+            return s.replace(/^CNStock:/i, '') || '—'
+          }
+        },
+        {
+          title: '股票名称',
+          dataIndex: 'name',
+          key: 'name',
+          ellipsis: true,
+          customRender: (text) => (text == null || text === '' ? '—' : text)
+        },
+        {
+          title: '分数',
+          dataIndex: 'score',
+          key: 'score',
+          width: 120,
+          customRender: (text) => (text == null || text === '' ? '—' : Number(text).toFixed(6))
+        }
+      ],
       statusData: null,
       runningJob: null,
       lastJob: null,
@@ -377,6 +717,15 @@ export default {
       importForm: {
         session_id: undefined,
         loop_index: undefined,
+        source: 'rdagent',
+        version: '',
+        universe: 'csi300'
+      },
+      inferForm: {
+        session_id: undefined,
+        loop_index: undefined,
+        mode: 'model',
+        max_asofs: 40,
         source: 'rdagent',
         version: '',
         universe: 'csi300'
@@ -440,6 +789,11 @@ export default {
       if (status === 'stopped') return { color: 'orange', text: '最近任务已停止' }
       return { color: 'default', text: status ? `最近任务 ${status}` : '最近任务' }
     },
+    inferPreviewTableRows () {
+      return (this.inferPreview && Array.isArray(this.inferPreview.rows))
+        ? this.inferPreview.rows
+        : []
+    },
     lastJobBanner () {
       if (this.runningJob || !this.lastJob) return { show: false }
       const status = String(this.lastJob.status || '').toLowerCase()
@@ -484,25 +838,51 @@ export default {
       const text = this.logText || ''
       return /429|RateLimit|余额不足|无可用资源包/.test(text)
     },
+    canPublish () {
+      return !!(
+        this.publishForm.session_id &&
+        this.publishForm.loop_index != null &&
+        this.publishForm.loop_index !== '' &&
+        String(this.publishForm.display_name || '').trim()
+      )
+    },
     sessionRowSelection () {
       return {
         type: 'radio',
         selectedRowKeys: this.selectedSessionKeys,
         onChange: (keys) => {
           this.selectedSessionKeys = keys
-          this.importForm.session_id = keys.length ? keys[0] : undefined
+          const sid = keys.length ? keys[0] : undefined
+          this.importForm.session_id = sid
+          this.inferForm.session_id = sid
+          this.publishForm.session_id = sid
         }
       }
     }
   },
   watch: {
+    'publishForm.session_id' (id, prev) {
+      if (id === prev) return
+      this.loadPublishLoops(id)
+    },
+    'publishForm.loop_index' (idx) {
+      this.syncPublishKindFromLoop(idx)
+    },
     'importForm.session_id' (id, prev) {
       if (id === prev) return
       this.loadExportableLoops(id)
+    },
+    'inferForm.session_id' (id, prev) {
+      if (id === prev) return
+      this.loadInferLoops(id)
+    },
+    'inferForm.mode' () {
+      this.updateInferVersionFromLoop()
     }
   },
   mounted () {
     this.refreshAll()
+    this.loadPublishedModels()
   },
   beforeDestroy () {
     this.stopPolling()
@@ -756,12 +1136,16 @@ export default {
       this.selectedDetailSessionId = record.id
       this.selectedSessionKeys = [record.id]
       this.importForm.session_id = record.id
+      this.inferForm.session_id = record.id
+      this.publishForm.session_id = record.id
     },
     fillImportFromDetail (sessionId) {
       if (!sessionId) return
       this.importForm.session_id = sessionId
+      this.inferForm.session_id = sessionId
+      this.publishForm.session_id = sessionId
       this.selectedSessionKeys = [sessionId]
-      this.$message.success(`已填入导入会话 ${sessionId}`)
+      this.$message.success(`已填入导入/推理会话 ${sessionId}`)
     },
     importLoopOptionLabel (loop) {
       if (!loop) return ''
@@ -790,8 +1174,32 @@ export default {
         this.importLoopsLoading = false
       }
     },
+    async loadInferLoops (sessionId) {
+      this.inferLoopOptions = []
+      this.inferForm.loop_index = undefined
+      this.updateInferVersionFromLoop()
+      if (!sessionId) return
+      this.inferLoopsLoading = true
+      try {
+        const res = await fetchSessionDetail(sessionId, 'summary')
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        const payload = this.unwrap(res) || {}
+        const loops = payload.exportable_loops ||
+          (payload.summary && payload.summary.exportable_loops) ||
+          []
+        this.inferLoopOptions = Array.isArray(loops) ? loops : []
+      } catch (error) {
+        this.inferLoopOptions = []
+        this.$message.warning(error.backendMessage || error.message || '加载可推理 Loop 失败')
+      } finally {
+        this.inferLoopsLoading = false
+      }
+    },
     onImportLoopChange () {
       this.updateImportVersionFromLoop()
+    },
+    onInferLoopChange () {
+      this.updateInferVersionFromLoop()
     },
     updateImportVersionFromLoop () {
       const sid = this.importForm.session_id
@@ -800,6 +1208,18 @@ export default {
         this.importForm.version = `session_${sid}_loop${idx}`
       } else {
         this.importForm.version = ''
+      }
+    },
+    updateInferVersionFromLoop () {
+      const sid = this.inferForm.session_id
+      const idx = this.inferForm.loop_index
+      const mode = this.inferForm.mode || 'model'
+      if (sid && idx != null && idx !== '') {
+        this.inferForm.version = `session_${sid}_loop${idx}_infer_${mode}`
+      } else if (sid) {
+        this.inferForm.version = `session_${sid}_infer_${mode}`
+      } else {
+        this.inferForm.version = ''
       }
     },
     async handleImport () {
@@ -832,6 +1252,166 @@ export default {
         this.$message.error(error.backendMessage || error.message || '导入失败')
       } finally {
         this.importing = false
+      }
+    },
+    async handleInfer () {
+      if (!this.inferForm.session_id) {
+        this.$message.warning('请先选择会话')
+        return
+      }
+      this.inferring = true
+      this.inferResult = null
+      this.inferPreview = null
+      this.inferPreviewAsOf = undefined
+      try {
+        const payload = {
+          session_id: this.inferForm.session_id,
+          source: this.inferForm.source || 'rdagent',
+          universe: this.inferForm.universe || 'csi300',
+          mode: this.inferForm.mode || 'model',
+          max_asofs: Number(this.inferForm.max_asofs) || 40,
+          import: true
+        }
+        if (this.inferForm.version && String(this.inferForm.version).trim()) {
+          payload.version = String(this.inferForm.version).trim()
+        }
+        if (this.inferForm.loop_index != null && this.inferForm.loop_index !== '') {
+          payload.loop_index = Number(this.inferForm.loop_index)
+        }
+        const res = await inferFromSession(payload)
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.inferResult = this.unwrap(res) || {}
+        this.applyInferPreview(this.inferResult.preview)
+        const n = this.inferResult.inserted != null
+          ? this.inferResult.inserted
+          : this.inferResult.row_count
+        this.$message.success(
+          `推理完成 ${this.inferResult.as_of_min || ''} → ${this.inferResult.as_of_max || ''}，入库 ${n || 0} 行`
+        )
+      } catch (error) {
+        this.$message.error(error.backendMessage || error.message || '推理失败')
+      } finally {
+        this.inferring = false
+      }
+    },
+    formatScore (val) {
+      if (val == null || val === '') return '—'
+      const n = Number(val)
+      if (Number.isNaN(n)) return String(val)
+      return n.toFixed(6)
+    },
+    applyInferPreview (preview) {
+      this.inferPreview = preview && typeof preview === 'object' ? preview : null
+      this.inferPreviewAsOf = this.inferPreview && this.inferPreview.as_of
+        ? this.inferPreview.as_of
+        : undefined
+      this.inferPreviewView = 'top'
+    },
+    async loadInferPreview () {
+      const source = (this.inferResult && this.inferResult.source) || this.inferForm.source || 'rdagent'
+      const version = (this.inferResult && this.inferResult.version) || this.inferForm.version
+      if (!version) return
+      this.inferPreviewLoading = true
+      try {
+        const res = await fetchAlphaPreview({
+          source,
+          version,
+          as_of: this.inferPreviewAsOf,
+          limit: this.inferPreviewLimit,
+          order: this.inferPreviewView === 'bottom' ? 'asc' : 'desc'
+        })
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        const payload = this.unwrap(res) || {}
+        this.inferPreview = payload
+        if (payload.as_of) this.inferPreviewAsOf = payload.as_of
+      } catch (error) {
+        this.$message.warning(error.backendMessage || error.message || '加载预览失败')
+      } finally {
+        this.inferPreviewLoading = false
+      }
+    },
+    onInferPreviewAsOfChange () {
+      this.loadInferPreview()
+    },
+    onInferPreviewViewChange () {
+      this.loadInferPreview()
+    },
+    loadInferPreviewFromResult () {
+      if (this.inferResult && this.inferResult.as_of_max) {
+        this.inferPreviewAsOf = this.inferResult.as_of_max
+      }
+      return this.loadInferPreview()
+    },
+    syncPublishKindFromLoop (loopIndex) {
+      if (loopIndex == null || loopIndex === '') {
+        this.publishForm.kind = undefined
+        return
+      }
+      const loop = (this.publishLoopOptions || []).find(
+        item => Number(item.loop_index) === Number(loopIndex)
+      )
+      const kind = loop && String(loop.kind || '').toLowerCase()
+      this.publishForm.kind = kind === 'model' || kind === 'factor' ? kind : 'factor'
+    },
+    async loadPublishLoops (sessionId) {
+      this.publishLoopOptions = []
+      this.publishForm.loop_index = undefined
+      this.publishForm.kind = undefined
+      if (!sessionId) return
+      this.publishLoopsLoading = true
+      try {
+        const res = await fetchSessionDetail(sessionId, 'summary')
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        const payload = this.unwrap(res) || {}
+        const loops = payload.exportable_loops ||
+          (payload.summary && payload.summary.exportable_loops) ||
+          []
+        this.publishLoopOptions = Array.isArray(loops) ? loops : []
+      } catch (error) {
+        this.publishLoopOptions = []
+        this.$message.warning(error.backendMessage || error.message || '加载可发布 Loop 失败')
+      } finally {
+        this.publishLoopsLoading = false
+      }
+    },
+    async loadPublishedModels () {
+      this.publishedModelsLoading = true
+      try {
+        const res = await fetchQuantModels({ status: 'published' })
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.publishedModels = this.unwrap(res) || []
+      } catch (error) {
+        this.publishedModels = []
+        this.$message.warning(error.backendMessage || error.message || '加载已发布模型失败')
+      } finally {
+        this.publishedModelsLoading = false
+      }
+    },
+    async handlePublish () {
+      if (!this.canPublish) {
+        this.$message.warning('请填写会话、Loop 与显示名称')
+        return
+      }
+      this.syncPublishKindFromLoop(this.publishForm.loop_index)
+      this.publishing = true
+      this.publishResult = null
+      try {
+        const payload = {
+          session_id: this.publishForm.session_id,
+          loop_index: Number(this.publishForm.loop_index),
+          kind: this.publishForm.kind || 'factor',
+          display_name: String(this.publishForm.display_name).trim(),
+          universe: this.publishForm.universe || 'csi300'
+        }
+        const res = await publishQuantModel(payload)
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.publishResult = this.unwrap(res) || {}
+        this.$message.success(`已发布 ${this.publishResult.model_key}`)
+        await this.loadPublishedModels()
+      } catch (error) {
+        this.$message.error(error.backendMessage || error.message || '发布失败')
+      } finally {
+        this.publishing = false
       }
     }
   }
@@ -972,7 +1552,35 @@ export default {
 .import-result {
   margin-top: 12px;
 }
+.published-models-table {
+  margin-top: 16px;
+}
+.infer-preview {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+.infer-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.infer-preview-meta {
+  color: #667085;
+  font-size: 12px;
+}
+.infer-preview-form {
+  margin-bottom: 8px;
+}
 .theme-dark .import-hint {
+  color: #a7a7a7;
+}
+.theme-dark .infer-preview {
+  border-top-color: #303030;
+}
+.theme-dark .infer-preview-meta {
   color: #a7a7a7;
 }
 @media (max-width: 760px) {
