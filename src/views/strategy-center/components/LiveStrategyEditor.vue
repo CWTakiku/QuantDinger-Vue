@@ -62,16 +62,54 @@
               <span><em>{{ $t('strategyV2.markets') }}</em><b>{{ manifestMarkets }}</b></span>
             </div>
           </div>
-          <div v-if="parameterDefinitions.length" class="parameter-panel parameter-panel--source">
+          <div v-if="usesExternalAlphaParams" class="parameter-panel parameter-panel--source quant-model-panel">
+            <div class="parameter-panel__head">
+              <div>
+                <strong>{{ $t('strategyV2.backtest.quantModelTitle') }}</strong>
+                <span>{{ $t('strategyV2.backtest.quantModelHint') }}</span>
+              </div>
+            </div>
+            <a-form-item :label="$t('strategyV2.backtest.quantModel')">
+              <a-select
+                v-model="selectedModelKey"
+                allow-clear
+                show-search
+                option-filter-prop="children"
+                data-testid="live-quant-model-select"
+                :placeholder="$t('strategyV2.backtest.quantModelPlaceholder')"
+                :loading="quantModelsLoading"
+                :not-found-content="quantModelsLoading ? undefined : $t('strategyV2.backtest.quantModelEmpty')"
+                @change="onQuantModelChange">
+                <a-select-option
+                  v-for="qm in quantModels"
+                  :key="qm.model_key"
+                  :value="qm.model_key">
+                  {{ quantModelLabel(qm) }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-alert
+              v-if="selectedQuantModel"
+              type="info"
+              show-icon
+              class="quant-model-alert"
+              :message="selectedQuantModel.display_name || selectedQuantModel.model_key"
+              :description="$t('strategyV2.backtest.quantModelSelectedDesc', {
+                source: model.templateParams.source || selectedQuantModel.alpha_source,
+                version: model.templateParams.version || selectedQuantModel.alpha_version
+              })" />
+            <p v-if="!selectedModelKey" class="manual-alpha-hint">{{ $t('strategyV2.backtest.manualAlphaHint') }}</p>
+          </div>
+          <div v-if="visibleParameterDefinitions.length" class="parameter-panel parameter-panel--source">
             <div class="parameter-panel__head">
               <div>
                 <strong>{{ $t('trading-assistant.editor.paramsTab') }}</strong>
                 <span>{{ $t('trading-assistant.editor.codeParamsDesc') }}</span>
               </div>
-              <a-tag>{{ parameterDefinitions.length }}</a-tag>
+              <a-tag>{{ visibleParameterDefinitions.length }}</a-tag>
             </div>
             <div class="parameter-grid">
-              <a-form-item v-for="param in parameterDefinitions" :key="param.name" :label="parameterLabel(param)">
+              <a-form-item v-for="param in visibleParameterDefinitions" :key="param.name" :label="parameterLabel(param)">
                 <a-switch
                   v-if="param.type === 'boolean'"
                   :checked="Boolean(model.templateParams[param.name])"
@@ -255,6 +293,7 @@
 
 <script>
 import { compileScriptSource, createStrategy, getScriptSourceDetail, getScriptSourceList, getStrategyDetail, listExternalAlphaPanels, updateStrategy } from '@/api/strategy'
+import { fetchQuantModels } from '@/api/quantModels'
 import { mapState } from 'vuex'
 import { listExchangeCredentials } from '@/api/credentials'
 import { getNotificationSettings } from '@/api/user'
@@ -321,6 +360,9 @@ export default {
       notificationSettings: {},
       notificationChannels: ['browser', 'email', 'telegram', 'discord', 'webhook', 'phone'],
       externalAlphaPanels: [],
+      quantModels: [],
+      quantModelsLoading: false,
+      selectedModelKey: null,
       model: this.defaultModel()
     }
   },
@@ -437,6 +479,19 @@ export default {
       const names = new Set(this.parameterDefinitions.map(item => item && item.name).filter(Boolean))
       return names.has('source') && names.has('version')
     },
+    selectedQuantModel () {
+      if (!this.selectedModelKey) return null
+      return this.quantModels.find(item => item.model_key === this.selectedModelKey) || null
+    },
+    visibleParameterDefinitions () {
+      return this.parameterDefinitions.filter(param => {
+        if (!param || !param.name) return false
+        // Dedicated model picker owns model_key / source+version when bound.
+        if (param.name === 'model_key') return false
+        if (this.selectedModelKey && this.isExternalAlphaPanelParam(param)) return false
+        return true
+      })
+    },
     externalAlphaSources () {
       const values = this.externalAlphaPanels.map(item => String(item.source || '').trim()).filter(Boolean)
       return Array.from(new Set(values)).sort()
@@ -514,6 +569,9 @@ export default {
       this.compiledManifest = {}
       this.sourceContractError = false
       this.originalStrategy = null
+      this.externalAlphaPanels = []
+      this.quantModels = []
+      this.selectedModelKey = null
       this.loading = true
       try {
         await Promise.all([
@@ -585,7 +643,11 @@ export default {
           this.model.leverage = 1
           this.normalizeExecutionFields()
         }
-        await this.loadExternalAlphaPanels()
+        await Promise.all([
+          this.loadExternalAlphaPanels(),
+          this.loadQuantModels({ preferDefault: Boolean(applyDefaults && !this.isEdit) })
+        ])
+        this.syncSelectedModelFromParams({ preferDefault: Boolean(applyDefaults && !this.isEdit) })
       } catch (error) {
         if (String(this.model.scriptSourceId) === sourceId) this.sourceContractError = true
         throw error
@@ -734,7 +796,7 @@ export default {
       }
     },
     ensureExternalAlphaSelection () {
-      if (!this.usesExternalAlphaParams) return
+      if (!this.usesExternalAlphaParams || this.selectedModelKey) return
       const sources = this.externalAlphaSources
       const currentSource = String((this.model.templateParams && this.model.templateParams.source) || '').trim()
       if (sources.length && !sources.includes(currentSource)) {
@@ -755,9 +817,84 @@ export default {
         const response = await listExternalAlphaPanels()
         const data = (response && response.data) || {}
         this.externalAlphaPanels = Array.isArray(data.panels) ? data.panels : []
-        this.ensureExternalAlphaSelection()
+        if (!this.selectedModelKey) this.ensureExternalAlphaSelection()
       } catch (error) {
         this.externalAlphaPanels = []
+      }
+    },
+    quantModelLabel (qm) {
+      if (!qm) return ''
+      const name = qm.display_name || qm.model_key || ''
+      const parts = [name]
+      if (qm.universe) parts.push(qm.universe)
+      if (qm.kind) parts.push(qm.kind)
+      return parts.filter(Boolean).join(' · ')
+    },
+    onQuantModelChange (modelKey) {
+      this.selectedModelKey = modelKey || null
+      if (!modelKey) {
+        this.setParameter('model_key', '')
+        this.ensureExternalAlphaSelection()
+        return
+      }
+      const qm = this.quantModels.find(item => item.model_key === modelKey)
+      if (!qm) return
+      this.setParameter('model_key', qm.model_key)
+      this.setParameter('source', qm.alpha_source || 'rdagent')
+      this.setParameter('version', qm.alpha_version || '')
+    },
+    syncSelectedModelFromParams ({ preferDefault = false } = {}) {
+      if (!this.usesExternalAlphaParams) {
+        this.selectedModelKey = null
+        return
+      }
+      const key = String((this.model.templateParams && this.model.templateParams.model_key) || '').trim()
+      if (key && this.quantModels.some(item => item.model_key === key)) {
+        this.onQuantModelChange(key)
+        return
+      }
+      const source = String((this.model.templateParams && this.model.templateParams.source) || '').trim()
+      const version = String((this.model.templateParams && this.model.templateParams.version) || '').trim()
+      if (source && version) {
+        const matched = this.quantModels.find(item =>
+          String(item.alpha_source || '') === source &&
+          String(item.alpha_version || '') === version
+        )
+        if (matched) {
+          this.onQuantModelChange(matched.model_key)
+          return
+        }
+      }
+      if (preferDefault && this.quantModels.length) {
+        this.onQuantModelChange(this.quantModels[0].model_key)
+        return
+      }
+      this.selectedModelKey = null
+      this.setParameter('model_key', '')
+      this.ensureExternalAlphaSelection()
+    },
+    async loadQuantModels ({ preferDefault = false } = {}) {
+      if (!this.usesExternalAlphaParams) {
+        this.quantModels = []
+        this.selectedModelKey = null
+        return
+      }
+      this.quantModelsLoading = true
+      try {
+        const response = await fetchQuantModels({ status: 'published' })
+        const data = (response && response.data) != null ? response.data : response
+        this.quantModels = Array.isArray(data) ? data : []
+        if (this.selectedModelKey && !this.quantModels.some(item => item.model_key === this.selectedModelKey)) {
+          this.selectedModelKey = null
+        }
+        if (preferDefault && this.quantModels.length === 1 && !this.selectedModelKey) {
+          this.onQuantModelChange(this.quantModels[0].model_key)
+        }
+      } catch (error) {
+        this.quantModels = []
+        this.$message.warning(this.$t('strategyV2.backtest.quantModelsLoadFailed'))
+      } finally {
+        this.quantModelsLoading = false
       }
     },
     async next () {
@@ -771,6 +908,13 @@ export default {
       if (this.step === 0 && !this.hasCurrentContract) {
         this.$message.warning(this.$t('strategyV2.sourceContractRequired'))
         return
+      }
+      if (this.step === 0 && this.usesExternalAlphaParams) {
+        const version = String((this.model.templateParams && this.model.templateParams.version) || '').trim()
+        if (!this.selectedModelKey && !version) {
+          this.$message.warning(this.$t('strategyV2.backtest.quantModelPlaceholder'))
+          return
+        }
       }
       if (this.step === 1) {
         if (!this.model.name) {
@@ -919,6 +1063,9 @@ export default {
   .parameter-panel__head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
   .parameter-panel__head strong { display: block; color: #202938; font-size: 14px; }
   .parameter-panel__head span { display: block; margin-top: 3px; color: #7d8794; font-size: 12px; }
+  .quant-model-panel .ant-form-item { margin-bottom: 12px; }
+  .quant-model-alert { margin-bottom: 10px; }
+  .manual-alpha-hint { margin: 0 0 12px; color: #7d8794; font-size: 12px; line-height: 1.5; }
   .parameter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
   .account-risk-panel { margin-top: 18px; padding: 16px 16px 4px; border: 1px solid #e4e8ee; border-radius: 9px; background: #fafbfc; }
   .account-risk-panel__head { margin-bottom: 14px; }

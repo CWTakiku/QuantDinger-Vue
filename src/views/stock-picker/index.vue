@@ -36,27 +36,13 @@
             </a-select>
           </a-form-item>
           <a-form-item label="交易日">
-            <a-select
-              v-if="asOfDates.length"
-              v-model="asOf"
-              style="width: 160px"
-              :disabled="!detail"
-              :loading="previewLoading"
-              placeholder="选择日期"
-              @change="onAsOfChange"
-            >
-              <a-select-option v-for="d in asOfDates" :key="d" :value="d">
-                {{ d }}
-              </a-select-option>
-            </a-select>
             <a-date-picker
-              v-else
-              v-model="asOf"
-              value-format="YYYY-MM-DD"
+              v-model="asOfMoment"
               :disabled="!detail"
+              :allow-clear="true"
               placeholder="选择日期"
               style="width: 160px"
-              @change="onAsOfChange"
+              @change="onAsOfPickerChange"
             />
           </a-form-item>
           <a-form-item label="Top N">
@@ -83,6 +69,7 @@
         <p v-if="detail" class="preview-meta">
           source={{ detail.alpha_source }} · version={{ detail.alpha_version }}
           <template v-if="asOf"> · as_of={{ asOf }}</template>
+          <template v-if="asOfDates.length"> · 已有分数日 {{ asOfDates.length }} 个</template>
         </p>
       </a-card>
 
@@ -176,6 +163,7 @@
 </template>
 
 <script>
+import moment from 'moment'
 import { mapState } from 'vuex'
 import { fetchQuantModels, fetchQuantModel, ensureQuantModelScores } from '@/api/quantModels'
 import { fetchAlphaPreview } from '@/api/rdagent'
@@ -237,6 +225,20 @@ export default {
     },
     showCompositionPanel () {
       return Boolean(this.selectedKey || this.compositionLoading)
+    },
+    asOfMoment: {
+      get () {
+        return this.asOf ? moment(this.asOf, 'YYYY-MM-DD') : null
+      },
+      set (value) {
+        if (!value) {
+          this.asOf = undefined
+          return
+        }
+        this.asOf = moment.isMoment(value)
+          ? value.format('YYYY-MM-DD')
+          : String(value).slice(0, 10)
+      }
     }
   },
   mounted () {
@@ -334,7 +336,10 @@ export default {
         if (!this.isSuccess(res)) throw new Error(res && res.msg)
         const payload = this.unwrap(res) || {}
         this.previewRows = (payload.rows || []).slice(0, this.topN)
-        if (payload.as_of) this.asOf = payload.as_of
+        // Keep the user-picked as_of; only fill when empty (initial load).
+        if (!this.asOf && payload.as_of) {
+          this.asOf = String(payload.as_of).slice(0, 10)
+        }
         if (Array.isArray(payload.as_of_dates) && payload.as_of_dates.length) {
           this.asOfDates = payload.as_of_dates
         }
@@ -359,7 +364,17 @@ export default {
         const body = { as_ofs: [this.asOf] }
         const res = await ensureQuantModelScores(this.selectedKey, body)
         if (!this.isSuccess(res)) throw new Error(res && res.msg)
-        this.$message.success('分数已刷新')
+        const ensureData = this.unwrap(res) || {}
+        const meta = ensureData.export_meta || {}
+        const effective = Array.isArray(ensureData.effective_as_ofs) ? ensureData.effective_as_ofs : []
+        const snapped = (meta.as_of_max || meta.infer_end || (effective.length ? effective[effective.length - 1] : '') || '').toString().slice(0, 10)
+        if (snapped && snapped !== this.asOf) {
+          const prev = this.asOf
+          this.asOf = snapped
+          this.$message.success(`分数已刷新（${prev} 无行情，已对齐到 ${snapped}）`)
+        } else {
+          this.$message.success('分数已刷新')
+        }
         await this.loadPreview()
       } catch (error) {
         this.$message.error(error.backendMessage || error.message || '刷新分数失败')
@@ -367,7 +382,15 @@ export default {
         this.ensuring = false
       }
     },
-    onAsOfChange () {
+    onAsOfPickerChange (value) {
+      if (!value) {
+        this.asOf = undefined
+        this.previewRows = []
+        return
+      }
+      this.asOf = moment.isMoment(value)
+        ? value.format('YYYY-MM-DD')
+        : String(value).slice(0, 10)
       this.loadPreview()
     },
     onTopNChange () {

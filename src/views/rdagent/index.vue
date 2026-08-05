@@ -552,8 +552,22 @@
             </a-form-item>
           </a-col>
           <a-col :xs="24" :md="6">
-            <a-form-item label="universe">
-              <a-input v-model="publishForm.universe" placeholder="csi300" />
+            <a-form-item label="标的池">
+              <a-select
+                v-model="publishForm.universe"
+                show-search
+                option-filter-prop="children"
+                placeholder="选择标的池"
+                :loading="universesLoading"
+              >
+                <a-select-option
+                  v-for="item in universeOptions"
+                  :key="`pub-uni-${item.code}`"
+                  :value="item.code"
+                >
+                  {{ item.name || item.code }}（{{ item.code }}）
+                </a-select-option>
+              </a-select>
             </a-form-item>
           </a-col>
         </a-row>
@@ -593,7 +607,57 @@
         :columns="publishedModelColumns"
         :data-source="publishedModels"
         :pagination="{ pageSize: 5, size: 'small' }"
-      />
+      >
+        <template slot="actions" slot-scope="text, record">
+          <a @click="openEditPublishedModel(record)">编辑</a>
+          <a-divider type="vertical" />
+          <a-popconfirm
+            title="确定硬删除该模型？分数面板不会删除。"
+            ok-text="删除"
+            cancel-text="取消"
+            @confirm="handleDeletePublishedModel(record)"
+          >
+            <a class="danger-link">删除</a>
+          </a-popconfirm>
+        </template>
+      </a-table>
+
+      <a-modal
+        title="编辑量化模型"
+        :visible="editModelVisible"
+        :confirm-loading="editModelSaving"
+        ok-text="保存"
+        cancel-text="取消"
+        destroy-on-close
+        @ok="handleSavePublishedModel"
+        @cancel="closeEditPublishedModel"
+      >
+        <a-form layout="vertical">
+          <a-form-item label="model_key">
+            <a-input :value="editModelForm.model_key" disabled />
+          </a-form-item>
+          <a-form-item label="显示名称" required>
+            <a-input v-model="editModelForm.display_name" placeholder="显示名称" />
+          </a-form-item>
+          <a-form-item label="标的池" required>
+            <a-select
+              v-model="editModelForm.universe"
+              show-search
+              option-filter-prop="children"
+              placeholder="选择标的池"
+              :loading="universesLoading"
+            >
+              <a-select-option
+                v-for="item in universeOptions"
+                :key="`edit-uni-${item.code}`"
+                :value="item.code"
+              >
+                {{ item.name || item.code }}（{{ item.code }}）
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+        </a-form>
+      </a-modal>
     </section>
   </div>
 </template>
@@ -615,7 +679,7 @@ import {
   startRdagentUi,
   stopRdagentJob
 } from '@/api/rdagent'
-import { publishQuantModel, fetchQuantModels } from '@/api/quantModels'
+import { publishQuantModel, fetchQuantModels, updateQuantModel, deleteQuantModel } from '@/api/quantModels'
 import { createVisibilityPolling } from '@/utils/visibilityPolling'
 import SessionDetail from './SessionDetail.vue'
 
@@ -660,8 +724,16 @@ export default {
         { title: '类型', dataIndex: 'kind', key: 'kind', width: 72 },
         { title: 'alpha_version', dataIndex: 'alpha_version', key: 'alpha_version', ellipsis: true },
         { title: 'universe', dataIndex: 'universe', key: 'universe', width: 96 },
-        { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 180 }
+        { title: '发布时间', dataIndex: 'published_at', key: 'published_at', width: 180 },
+        { title: '操作', key: 'actions', scopedSlots: { customRender: 'actions' }, width: 120 }
       ],
+      editModelVisible: false,
+      editModelSaving: false,
+      editModelForm: {
+        model_key: '',
+        display_name: '',
+        universe: 'csi300'
+      },
       publishForm: {
         session_id: undefined,
         loop_index: undefined,
@@ -1413,6 +1485,54 @@ export default {
       } finally {
         this.publishing = false
       }
+    },
+    openEditPublishedModel (record) {
+      if (!record) return
+      this.editModelForm = {
+        model_key: record.model_key,
+        display_name: record.display_name || '',
+        universe: record.universe || 'csi300'
+      }
+      this.editModelVisible = true
+      if (!this.universes.length) this.loadUniverses()
+    },
+    closeEditPublishedModel () {
+      this.editModelVisible = false
+      this.editModelSaving = false
+    },
+    async handleSavePublishedModel () {
+      const key = String(this.editModelForm.model_key || '').trim()
+      const name = String(this.editModelForm.display_name || '').trim()
+      const universe = String(this.editModelForm.universe || '').trim() || 'csi300'
+      if (!key) return
+      if (!name) {
+        this.$message.warning('请填写显示名称')
+        return
+      }
+      this.editModelSaving = true
+      try {
+        const res = await updateQuantModel(key, { display_name: name, universe })
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.$message.success('已保存')
+        this.editModelVisible = false
+        await this.loadPublishedModels()
+      } catch (error) {
+        this.$message.error(error.backendMessage || error.message || '保存失败')
+      } finally {
+        this.editModelSaving = false
+      }
+    },
+    async handleDeletePublishedModel (record) {
+      const key = record && record.model_key
+      if (!key) return
+      try {
+        const res = await deleteQuantModel(key)
+        if (!this.isSuccess(res)) throw new Error(res && res.msg)
+        this.$message.success(`已删除 ${key}`)
+        await this.loadPublishedModels()
+      } catch (error) {
+        this.$message.error(error.backendMessage || error.message || '删除失败')
+      }
     }
   }
 }
@@ -1518,6 +1638,9 @@ export default {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.danger-link {
+  color: #cf1322;
 }
 .theme-dark {
   background: #0b0b0b;

@@ -25,6 +25,21 @@ export function fetchQuantModel (modelKey) {
   })
 }
 
+export function updateQuantModel (modelKey, data) {
+  return request({
+    url: `/api/quant-models/${encodeURIComponent(modelKey)}`,
+    method: 'patch',
+    data
+  })
+}
+
+export function deleteQuantModel (modelKey) {
+  return request({
+    url: `/api/quant-models/${encodeURIComponent(modelKey)}`,
+    method: 'delete'
+  })
+}
+
 export function ensureQuantModelScores (modelKey, data) {
   return request({
     url: `/api/quant-models/${encodeURIComponent(modelKey)}/ensure-scores`,

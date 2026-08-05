@@ -1284,6 +1284,10 @@ export default {
         if (!text) continue
         if (/^request failed with status code \d+$/i.test(text)) continue
         if (text === 'Network Error') continue
+        if (text.startsWith('strategyV2.') || text.startsWith('quantModels.')) {
+          const translated = this.$t(text)
+          if (translated && translated !== text) return translated
+        }
         return text
       }
       const status = error.response && error.response.status
