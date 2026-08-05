@@ -380,12 +380,18 @@ export default {
         const effective = Array.isArray(ensureData.effective_as_ofs) ? ensureData.effective_as_ofs : []
         const snapped = (meta.as_of_max || meta.infer_end || (effective.length ? effective[effective.length - 1] : '') || '').toString().slice(0, 10)
         const inferred = Number(ensureData.inferred || 0)
-        const qlibOk = ensureData.qlib_update && ensureData.qlib_update.ok !== false
+        const qlib = ensureData.qlib_update || {}
+        const qlibFailed = qlib && qlib.ok === false
+        const qlibOk = qlib && qlib.ok === true
         if (reason === 'not_closed') {
           if (snapped) this.asOf = snapped
           this.$message.warning(`当日未收盘，已显示最近分数日 ${snapped || '—'}`)
         } else if (reason === 'future') {
           this.$message.warning('不能刷新未来交易日')
+        } else if (qlibFailed) {
+          const detail = qlib.reason || qlib.error || reason || '未知错误'
+          this.$message.error(`行情同步失败：${detail}`)
+          if (snapped) this.asOf = snapped
         } else if (snapped && snapped !== prev && (inferred > 0 || qlibOk)) {
           this.asOf = snapped
           this.$message.success(`已同步行情并刷新至 ${snapped}`)
