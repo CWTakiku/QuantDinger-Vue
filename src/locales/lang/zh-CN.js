@@ -1043,6 +1043,7 @@ const locale = {
   "trading-bot.ai.networkError": "网络错误，请检查连接后重试",
   "menu.dashboard.portfolio": "资产监测",
   "menu.dashboard.globalMarket": "全球金融",
+  "menu.dashboard.stockPicker": "选股",
   "menu.dashboard.rdagent": "研究工厂",
   "menu.settings": "系统设置",
   "menu.dashboard.aiTradingAssistant": "AI交易助手",

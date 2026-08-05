@@ -1037,6 +1037,7 @@ const locale = {
   "trading-bot.ai.networkError": "Network error, please check connection and retry",
   "menu.dashboard.portfolio": "Portfolio",
   "menu.dashboard.globalMarket": "Global Market",
+  "menu.dashboard.stockPicker": "Stock Picker",
   "menu.dashboard.rdagent": "RD-Agent Lab",
   "menu.settings": "Settings",
   "menu.dashboard.aiTradingAssistant": "AI Trading Assistant",

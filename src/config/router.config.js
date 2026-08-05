@@ -62,6 +62,12 @@ export const asyncRouterMap = [
         meta: { title: 'menu.dashboard.universeManager', keepAlive: true, icon: 'database', permission: ['dashboard'] }
       },
       {
+        path: '/stock-picker',
+        name: 'StockPicker',
+        component: () => import('@/views/stock-picker'),
+        meta: { title: 'menu.dashboard.stockPicker', keepAlive: false, icon: 'fund', permission: ['admin'] }
+      },
+      {
         path: '/rdagent',
         name: 'RdAgentLab',
         component: () => import('@/views/rdagent'),

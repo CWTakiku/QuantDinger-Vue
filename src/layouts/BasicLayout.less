@@ -32,16 +32,29 @@
   margin: 0 !important;
 }
 
-.basic-layout-wrapper .ant-pro-top-nav-header-left {
-  flex: 0 0 204px !important;
-  width: 204px !important;
-  min-width: 204px !important;
+/* Top menu: drop reserved logo gutter so nav items start near the left edge. */
+.basic-layout-wrapper .ant-pro-top-nav-header-left,
+.basic-layout-wrapper .ant-layout-header.ant-pro-top-menu .ant-pro-global-header-logo,
+.basic-layout-wrapper .ant-layout-header.ant-pro-top-menu .ant-pro-sider-menu-logo,
+.basic-layout-wrapper .ant-pro-top-nav-header .ant-pro-top-nav-header-logo {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  flex: 0 0 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
 }
 
-.basic-layout-wrapper .ant-pro-top-nav-header-menu {
+.basic-layout-wrapper .ant-pro-top-nav-header-menu,
+.basic-layout-wrapper .ant-layout-header.ant-pro-top-menu .ant-pro-global-header-content {
   flex: 1 1 auto !important;
   min-width: 0 !important;
   max-width: none !important;
+  padding-left: 8px !important;
+  margin-left: 0 !important;
 }
 
 .basic-layout-wrapper .ant-pro-global-header {
@@ -151,7 +164,6 @@
 }
 
 @media (min-width: 769px) and (max-width: 1366px) {
-  .basic-layout-wrapper .ant-pro-top-nav-header-left,
   .basic-layout-wrapper .ant-pro-global-header-logo,
   .basic-layout-wrapper .ant-layout-header .ant-pro-sider-menu-logo {
     flex-basis: 168px !important;
