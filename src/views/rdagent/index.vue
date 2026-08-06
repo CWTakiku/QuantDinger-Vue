@@ -805,6 +805,7 @@ export default {
       selectedSessionKeys: [],
       scenarios: [
         { value: 'fin_factor', label: 'fin_factor（因子挖掘）' },
+        { value: 'fin_model', label: 'fin_model（模型研究）' },
         { value: 'fin_quant', label: 'fin_quant（量化研究）' }
       ],
       sessionColumns: [
