@@ -322,11 +322,10 @@ export default {
         this.compositionLoading = false
       }
     },
-    async loadPreview ({ quietSnap } = {}) {
+    async loadPreview () {
       if (!this.detail || !this.detail.alpha_source || !this.detail.alpha_version) return
       this.previewLoading = true
       try {
-        const requested = this.asOf
         const res = await fetchAlphaPreview({
           source: this.detail.alpha_source,
           version: this.detail.alpha_version,
@@ -337,20 +336,12 @@ export default {
         if (!this.isSuccess(res)) throw new Error(res && res.msg)
         const payload = this.unwrap(res) || {}
         this.previewRows = (payload.rows || []).slice(0, this.topN)
-        const payloadAsOf = payload.as_of ? String(payload.as_of).slice(0, 10) : ''
-        // Align picker when API PIT-snaps (no exact panel day for requested date).
-        if (payloadAsOf && (!this.asOf || this.asOf !== payloadAsOf)) {
-          const prev = this.asOf
-          this.asOf = payloadAsOf
-          if (prev && prev !== payloadAsOf && !quietSnap) {
-            this.$message.info(`${prev} 无精确分数截面，已对齐到 ${payloadAsOf}`)
-          }
+        // Keep the user-picked as_of; only fill when empty (initial load).
+        if (!this.asOf && payload.as_of) {
+          this.asOf = String(payload.as_of).slice(0, 10)
         }
         if (Array.isArray(payload.as_of_dates) && payload.as_of_dates.length) {
           this.asOfDates = payload.as_of_dates
-        }
-        if (requested && !(payload.rows || []).length) {
-          this.$message.warning('该交易日暂无分数，请换日或先刷新')
         }
       } catch (error) {
         this.previewRows = []
@@ -370,37 +361,21 @@ export default {
       }
       this.ensuring = true
       try {
-        const prev = this.asOf
         const body = { as_ofs: [this.asOf] }
         const res = await ensureQuantModelScores(this.selectedKey, body)
         if (!this.isSuccess(res)) throw new Error(res && res.msg)
         const ensureData = this.unwrap(res) || {}
-        const reason = ensureData.sync_reason
         const meta = ensureData.export_meta || {}
         const effective = Array.isArray(ensureData.effective_as_ofs) ? ensureData.effective_as_ofs : []
         const snapped = (meta.as_of_max || meta.infer_end || (effective.length ? effective[effective.length - 1] : '') || '').toString().slice(0, 10)
-        const inferred = Number(ensureData.inferred || 0)
-        const qlib = ensureData.qlib_update || {}
-        const qlibFailed = qlib && qlib.ok === false
-        const qlibOk = qlib && qlib.ok === true
-        if (reason === 'not_closed') {
-          if (snapped) this.asOf = snapped
-          this.$message.warning(`当日未收盘，已显示最近分数日 ${snapped || '—'}`)
-        } else if (reason === 'future') {
-          this.$message.warning('不能刷新未来交易日')
-        } else if (qlibFailed) {
-          const detail = qlib.reason || qlib.error || reason || '未知错误'
-          this.$message.error(`行情同步失败：${detail}`)
-          if (snapped) this.asOf = snapped
-        } else if (snapped && snapped !== prev && (inferred > 0 || qlibOk)) {
+        if (snapped && snapped !== this.asOf) {
+          const prev = this.asOf
           this.asOf = snapped
-          this.$message.success(`已同步行情并刷新至 ${snapped}`)
-        } else if (inferred > 0) {
-          this.$message.success('分数已刷新')
+          this.$message.success(`分数已刷新（${prev} 无行情，已对齐到 ${snapped}）`)
         } else {
-          this.$message.success('分数已就绪')
+          this.$message.success('分数已刷新')
         }
-        await this.loadPreview({ quietSnap: true })
+        await this.loadPreview()
       } catch (error) {
         this.$message.error(error.backendMessage || error.message || '刷新分数失败')
       } finally {
